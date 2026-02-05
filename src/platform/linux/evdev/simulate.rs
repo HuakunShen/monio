@@ -2,6 +2,8 @@
 //!
 //! Creates a virtual input device to inject keyboard and mouse events.
 
+#![allow(dead_code)]
+
 use crate::error::{Error, Result};
 use crate::event::{Button, Event, EventType};
 use crate::keycode::Key;
@@ -29,9 +31,8 @@ fn get_virtual_device() -> Result<std::sync::MutexGuard<'static, Option<VirtualD
 
         // Add common keys
         for code in 1..256 {
-            if let Some(key) = EvdevKey::new(code) {
-                keys.insert(key);
-            }
+            let key = EvdevKey::new(code);
+            keys.insert(key);
         }
         // Add mouse buttons
         keys.insert(EvdevKey::BTN_LEFT);
@@ -48,13 +49,13 @@ fn get_virtual_device() -> Result<std::sync::MutexGuard<'static, Option<VirtualD
 
         let device = VirtualDeviceBuilder::new()
             .map_err(|e| {
-                Error::SimulationFailed(format!("Failed to create virtual device builder: {}", e))
+                Error::SimulateFailed(format!("Failed to create virtual device builder: {}", e))
             })?
             .name("monio virtual device")
             .with_keys(&keys)
-            .map_err(|e| Error::SimulationFailed(format!("Failed to add keys: {}", e)))?
+            .map_err(|e| Error::SimulateFailed(format!("Failed to add keys: {}", e)))?
             .with_relative_axes(&rel_axes)
-            .map_err(|e| Error::SimulationFailed(format!("Failed to add relative axes: {}", e)))?
+            .map_err(|e| Error::SimulateFailed(format!("Failed to add relative axes: {}", e)))?
             .build()
             .map_err(|e| {
                 Error::PermissionDenied(format!(
@@ -87,7 +88,7 @@ fn emit_key(key: EvdevKey, pressed: bool) -> Result<()> {
     let mut guard = get_virtual_device()?;
     let device = guard
         .as_mut()
-        .ok_or_else(|| Error::SimulationFailed("Virtual device not initialized".into()))?;
+        .ok_or_else(|| Error::SimulateFailed("Virtual device not initialized".into()))?;
 
     let value = if pressed { 1 } else { 0 };
     let events = [
@@ -98,7 +99,7 @@ fn emit_key(key: EvdevKey, pressed: bool) -> Result<()> {
 
     device
         .emit(&events)
-        .map_err(|e| Error::SimulationFailed(format!("Failed to emit key event: {}", e)))?;
+        .map_err(|e| Error::SimulateFailed(format!("Failed to emit key event: {}", e)))?;
 
     Ok(())
 }
@@ -108,7 +109,7 @@ fn emit_relative(axis: RelativeAxisType, value: i32) -> Result<()> {
     let mut guard = get_virtual_device()?;
     let device = guard
         .as_mut()
-        .ok_or_else(|| Error::SimulationFailed("Virtual device not initialized".into()))?;
+        .ok_or_else(|| Error::SimulateFailed("Virtual device not initialized".into()))?;
 
     let events = [
         InputEvent::new(EvdevEventType::RELATIVE, axis.0, value),
@@ -117,7 +118,7 @@ fn emit_relative(axis: RelativeAxisType, value: i32) -> Result<()> {
 
     device
         .emit(&events)
-        .map_err(|e| Error::SimulationFailed(format!("Failed to emit relative event: {}", e)))?;
+        .map_err(|e| Error::SimulateFailed(format!("Failed to emit relative event: {}", e)))?;
 
     Ok(())
 }
@@ -136,17 +137,17 @@ pub fn simulate(event: &Event) -> Result<()> {
             }
         }
         EventType::MousePressed => {
-            if let Some(mouse) = &event.mouse {
-                if let Some(button) = &mouse.button {
-                    mouse_press(*button)?;
-                }
+            if let Some(mouse) = &event.mouse
+                && let Some(button) = &mouse.button
+            {
+                mouse_press(*button)?;
             }
         }
         EventType::MouseReleased => {
-            if let Some(mouse) = &event.mouse {
-                if let Some(button) = &mouse.button {
-                    mouse_release(*button)?;
-                }
+            if let Some(mouse) = &event.mouse
+                && let Some(button) = &mouse.button
+            {
+                mouse_release(*button)?;
             }
         }
         EventType::MouseMoved | EventType::MouseDragged => {
@@ -162,27 +163,15 @@ pub fn simulate(event: &Event) -> Result<()> {
 /// Press a key.
 pub fn key_press(key: Key) -> Result<()> {
     let code = key_to_evdev_keycode(key);
-    if let Some(evdev_key) = EvdevKey::new(code) {
-        emit_key(evdev_key, true)
-    } else {
-        Err(Error::SimulationFailed(format!(
-            "Unknown key code: {}",
-            code
-        )))
-    }
+    let evdev_key = EvdevKey::new(code);
+    emit_key(evdev_key, true)
 }
 
 /// Release a key.
 pub fn key_release(key: Key) -> Result<()> {
     let code = key_to_evdev_keycode(key);
-    if let Some(evdev_key) = EvdevKey::new(code) {
-        emit_key(evdev_key, false)
-    } else {
-        Err(Error::SimulationFailed(format!(
-            "Unknown key code: {}",
-            code
-        )))
-    }
+    let evdev_key = EvdevKey::new(code);
+    emit_key(evdev_key, false)
 }
 
 /// Press and release a key.

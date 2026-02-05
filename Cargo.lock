@@ -696,6 +696,7 @@ dependencies = [
  "crossterm 0.28.1",
  "ctrlc",
  "evdev",
+ "libc",
  "log",
  "objc2",
  "objc2-core-foundation",

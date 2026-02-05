@@ -1,5 +1,7 @@
 //! evdev backend has no display/system settings access.
 
+#![allow(dead_code)]
+
 use crate::display::{DisplayInfo, SystemSettings};
 use crate::error::{Error, Result};
 

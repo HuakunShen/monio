@@ -37,17 +37,17 @@ pub fn simulate(event: &Event) -> Result<()> {
             }
         }
         EventType::MousePressed => {
-            if let Some(mouse) = &event.mouse {
-                if let Some(button) = mouse.button {
-                    mouse_press(button)?;
-                }
+            if let Some(mouse) = &event.mouse
+                && let Some(button) = mouse.button
+            {
+                mouse_press(button)?;
             }
         }
         EventType::MouseReleased => {
-            if let Some(mouse) = &event.mouse {
-                if let Some(button) = mouse.button {
-                    mouse_release(button)?;
-                }
+            if let Some(mouse) = &event.mouse
+                && let Some(button) = mouse.button
+            {
+                mouse_release(button)?;
             }
         }
         EventType::MouseMoved | EventType::MouseDragged => {

@@ -3,6 +3,8 @@
 //! Reads input events directly from /dev/input/event* devices.
 //! Works on both X11 and Wayland.
 
+#![allow(dead_code)]
+
 use crate::error::{Error, Result};
 use crate::event::{Button, Event, ScrollDirection};
 use crate::hook::{EventHandler, GrabHandler};
@@ -11,13 +13,12 @@ use crate::state::{
     self, MASK_ALT, MASK_BUTTON1, MASK_BUTTON2, MASK_BUTTON3, MASK_BUTTON4, MASK_BUTTON5,
     MASK_CTRL, MASK_META, MASK_SHIFT,
 };
-use evdev::{Device, EventType as EvdevEventType, InputEventKind, Key as EvdevKey};
+use evdev::{Device, EventType as EvdevEventType, InputEventKind};
 use std::collections::HashMap;
 use std::fs;
 use std::os::unix::io::AsRawFd;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 /// Flag to signal stopping
 static STOP_FLAG: Mutex<Option<Arc<AtomicBool>>> = Mutex::new(None);
@@ -244,7 +245,7 @@ where
         .collect();
 
     // Store devices in a map for easy lookup
-    let device_map: HashMap<i32, Device> =
+    let mut device_map: HashMap<i32, Device> =
         devices.into_iter().map(|d| (d.as_raw_fd(), d)).collect();
 
     while running.load(Ordering::SeqCst) {
@@ -266,17 +267,15 @@ where
 
         // Process events from devices with data
         for pfd in &poll_fds {
-            if pfd.revents & libc::POLLIN != 0 {
-                if let Some(device) = device_map.get(&pfd.fd) {
-                    // Note: We can't easily mutate device here due to HashMap
-                    // In a real implementation, we'd use interior mutability
-                    // For now, we'll use a simpler approach
-                }
+            if pfd.revents & libc::POLLIN != 0 && device_map.contains_key(&pfd.fd) {
+                // Note: We can't easily mutate device here due to HashMap
+                // In a real implementation, we'd use interior mutability
+                // For now, we'll use a simpler approach
             }
         }
 
         // Simplified approach: iterate and fetch events
-        for (_, device) in &device_map {
+        for device in device_map.values_mut() {
             if let Ok(events) = device.fetch_events() {
                 for ev in events {
                     if let Some(event) = convert_event(&ev) {
@@ -330,18 +329,17 @@ where
 
         // Process events
         for (i, pfd) in poll_fds.iter().enumerate() {
-            if pfd.revents & libc::POLLIN != 0 {
-                if let Some(device) = devices.get_mut(i) {
-                    if let Ok(events) = device.fetch_events() {
-                        for ev in events {
-                            if let Some(event) = convert_event(&ev) {
-                                let _pass_through = callback(&event);
-                                // Note: In true grab mode, we'd need to re-inject
-                                // the event if pass_through is true. This requires
-                                // uinput which adds complexity. For now, we just
-                                // consume all events when grabbed.
-                            }
-                        }
+            if pfd.revents & libc::POLLIN != 0
+                && let Some(device) = devices.get_mut(i)
+                && let Ok(events) = device.fetch_events()
+            {
+                for ev in events {
+                    if let Some(event) = convert_event(&ev) {
+                        let _pass_through = callback(&event);
+                        // Note: In true grab mode, we'd need to re-inject
+                        // the event if pass_through is true. This requires
+                        // uinput which adds complexity. For now, we just
+                        // consume all events when grabbed.
                     }
                 }
             }
@@ -359,7 +357,7 @@ fn convert_event(ev: &evdev::InputEvent) -> Option<Event> {
             let pressed = ev.value() == 1;
 
             // Check if it's a mouse button
-            if code >= 0x110 && code <= 0x117 {
+            if (0x110..=0x117).contains(&code) {
                 let button = code_to_button(code)?;
                 let mask = code_to_mask(code);
 

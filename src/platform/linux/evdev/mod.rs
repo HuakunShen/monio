@@ -15,6 +15,8 @@
 //! # Then log out and back in
 //! ```
 
+#![allow(unused_imports)]
+
 mod display;
 mod listen;
 mod simulate;

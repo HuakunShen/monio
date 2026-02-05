@@ -59,68 +59,68 @@ fn update_key_modifier(code: u32, pressed: bool) {
 /// Convert X11 event to our Event type
 fn convert_event(type_: c_int, code: u8, x: f64, y: f64) -> Option<Event> {
     match type_ {
-        x if x == xlib::KeyPress => {
+        t if t == xlib::KeyPress => {
             let code32 = code as u32;
             update_key_modifier(code32, true);
             let key = keycode_to_key(code32);
             Some(Event::key_pressed(key, code32))
         }
 
-        x if x == xlib::KeyRelease => {
+        t if t == xlib::KeyRelease => {
             let code32 = code as u32;
             update_key_modifier(code32, false);
             let key = keycode_to_key(code32);
             Some(Event::key_released(key, code32))
         }
 
-        x if x == xlib::ButtonPress => {
+        t if t == xlib::ButtonPress => {
             match code {
                 1 => {
                     state::set_mask(MASK_BUTTON1);
-                    Some(Event::mouse_pressed(Button::Left, x as f64, y))
+                    Some(Event::mouse_pressed(Button::Left, x, y))
                 }
                 2 => {
                     state::set_mask(MASK_BUTTON3);
-                    Some(Event::mouse_pressed(Button::Middle, x as f64, y))
+                    Some(Event::mouse_pressed(Button::Middle, x, y))
                 }
                 3 => {
                     state::set_mask(MASK_BUTTON2);
-                    Some(Event::mouse_pressed(Button::Right, x as f64, y))
+                    Some(Event::mouse_pressed(Button::Right, x, y))
                 }
                 // Scroll wheel events in X11
-                4 => Some(Event::mouse_wheel(x as f64, y, ScrollDirection::Up, 1.0)),
-                5 => Some(Event::mouse_wheel(x as f64, y, ScrollDirection::Down, 1.0)),
-                6 => Some(Event::mouse_wheel(x as f64, y, ScrollDirection::Left, 1.0)),
-                7 => Some(Event::mouse_wheel(x as f64, y, ScrollDirection::Right, 1.0)),
-                c => Some(Event::mouse_pressed(Button::Unknown(c), x as f64, y)),
+                4 => Some(Event::mouse_wheel(x, y, ScrollDirection::Up, 1.0)),
+                5 => Some(Event::mouse_wheel(x, y, ScrollDirection::Down, 1.0)),
+                6 => Some(Event::mouse_wheel(x, y, ScrollDirection::Left, 1.0)),
+                7 => Some(Event::mouse_wheel(x, y, ScrollDirection::Right, 1.0)),
+                c => Some(Event::mouse_pressed(Button::Unknown(c), x, y)),
             }
         }
 
-        x if x == xlib::ButtonRelease => {
+        t if t == xlib::ButtonRelease => {
             match code {
                 1 => {
                     state::unset_mask(MASK_BUTTON1);
-                    Some(Event::mouse_released(Button::Left, x as f64, y))
+                    Some(Event::mouse_released(Button::Left, x, y))
                 }
                 2 => {
                     state::unset_mask(MASK_BUTTON3);
-                    Some(Event::mouse_released(Button::Middle, x as f64, y))
+                    Some(Event::mouse_released(Button::Middle, x, y))
                 }
                 3 => {
                     state::unset_mask(MASK_BUTTON2);
-                    Some(Event::mouse_released(Button::Right, x as f64, y))
+                    Some(Event::mouse_released(Button::Right, x, y))
                 }
-                4 | 5 | 6 | 7 => None, // Wheel "release" - ignored
-                c => Some(Event::mouse_released(Button::Unknown(c), x as f64, y)),
+                4..=7 => None, // Wheel "release" - ignored
+                c => Some(Event::mouse_released(Button::Unknown(c), x, y)),
             }
         }
 
-        x if x == xlib::MotionNotify => {
+        t if t == xlib::MotionNotify => {
             // THE KEY FIX: Check button state for drag detection
             if state::is_button_held() {
-                Some(Event::mouse_dragged(x as f64, y))
+                Some(Event::mouse_dragged(x, y))
             } else {
-                Some(Event::mouse_moved(x as f64, y))
+                Some(Event::mouse_moved(x, y))
             }
         }
 
@@ -145,13 +145,12 @@ unsafe extern "C" fn record_callback(
         }
 
         // Check stop flag
-        if let Ok(guard) = STOP_FLAG.lock() {
-            if let Some(ref flag) = *guard {
-                if !flag.load(Ordering::SeqCst) {
-                    xrecord::XRecordFreeData(raw_data);
-                    return;
-                }
-            }
+        if let Ok(guard) = STOP_FLAG.lock()
+            && let Some(ref flag) = *guard
+            && !flag.load(Ordering::SeqCst)
+        {
+            xrecord::XRecordFreeData(raw_data);
+            return;
         }
 
         // Parse the event data
@@ -169,12 +168,11 @@ unsafe extern "C" fn record_callback(
         let x = xdatum.root_x as f64;
         let y = xdatum.root_y as f64;
 
-        if let Some(event) = convert_event(type_, code, x, y) {
-            if let Ok(guard) = HANDLER.lock() {
-                if let Some(ref handler) = *guard {
-                    handler.handle_event(&event);
-                }
-            }
+        if let Some(event) = convert_event(type_, code, x, y)
+            && let Ok(guard) = HANDLER.lock()
+            && let Some(ref handler) = *guard
+        {
+            handler.handle_event(&event);
         }
 
         xrecord::XRecordFreeData(raw_data);
@@ -241,12 +239,10 @@ pub fn run_hook<H: EventHandler + 'static>(running: &Arc<AtomicBool>, handler: H
         xlib::XSync(dpy_control, FALSE);
 
         // Send hook enabled event
+        if let Ok(guard) = HANDLER.lock()
+            && let Some(ref handler) = *guard
         {
-            if let Ok(guard) = HANDLER.lock() {
-                if let Some(ref handler) = *guard {
-                    handler.handle_event(&Event::hook_enabled());
-                }
-            }
+            handler.handle_event(&Event::hook_enabled());
         }
 
         // Run the record loop
@@ -254,12 +250,10 @@ pub fn run_hook<H: EventHandler + 'static>(running: &Arc<AtomicBool>, handler: H
             xrecord::XRecordEnableContext(dpy_control, context, Some(record_callback), &mut 0);
 
         // Send hook disabled event
+        if let Ok(guard) = HANDLER.lock()
+            && let Some(ref handler) = *guard
         {
-            if let Ok(guard) = HANDLER.lock() {
-                if let Some(ref handler) = *guard {
-                    handler.handle_event(&Event::hook_disabled());
-                }
-            }
+            handler.handle_event(&Event::hook_disabled());
         }
 
         // Clean up

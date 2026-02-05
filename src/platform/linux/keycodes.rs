@@ -4,6 +4,8 @@
 //! - X11 keycodes: Used by XRecord (X11 keycodes = evdev + 8)
 //! - evdev keycodes: Used by evdev backend (raw Linux input event codes)
 
+#![allow(dead_code)]
+
 use crate::keycode::Key;
 
 // Conversion constant: X11 keycode = evdev keycode + 8
