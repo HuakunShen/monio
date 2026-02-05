@@ -19,6 +19,32 @@ use std::time::Duration;
 /// Lazy-initialized virtual device for simulation
 static VIRTUAL_DEVICE: Mutex<Option<VirtualDevice>> = Mutex::new(None);
 
+/// Emit raw input events directly (for grab mode re-injection).
+/// This is an internal function used by the grab mode to pass through events.
+pub(crate) fn emit_event(ev: &InputEvent) -> Result<()> {
+    let mut guard = get_virtual_device()?;
+    let device = guard
+        .as_mut()
+        .ok_or_else(|| Error::SimulateFailed("Virtual device not initialized".into()))?;
+
+    // Create a new event with current timestamp - don't reuse the original event
+    // as it may have stale timestamp or other metadata issues
+    let event_type = ev.event_type();
+    let code = ev.code();
+    let value = ev.value();
+    
+    let events = [
+        InputEvent::new(event_type, code, value),
+        InputEvent::new(EvdevEventType::SYNCHRONIZATION, 0, 0),
+    ];
+    
+    device
+        .emit(&events)
+        .map_err(|e| Error::SimulateFailed(format!("Failed to emit event: {}", e)))?;
+
+    Ok(())
+}
+
 /// Get or create the virtual device
 fn get_virtual_device() -> Result<std::sync::MutexGuard<'static, Option<VirtualDevice>>> {
     let mut guard = VIRTUAL_DEVICE
@@ -51,7 +77,7 @@ fn get_virtual_device() -> Result<std::sync::MutexGuard<'static, Option<VirtualD
             .map_err(|e| {
                 Error::SimulateFailed(format!("Failed to create virtual device builder: {}", e))
             })?
-            .name("monio virtual device")
+            .name("monio grab passthrough")
             .with_keys(&keys)
             .map_err(|e| Error::SimulateFailed(format!("Failed to add keys: {}", e)))?
             .with_relative_axes(&rel_axes)

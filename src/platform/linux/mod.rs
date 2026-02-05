@@ -16,6 +16,33 @@
 //! sudo usermod -aG input $USER
 //! # Then log out and back in
 //! ```
+//!
+//! ## Grab Mode on Wayland - IMPORTANT LIMITATION
+//!
+//! On **Wayland**, grab mode has a fundamental limitation due to how Wayland
+//! compositors handle input via **libinput**:
+//!
+//! - ✅ **Blocking events works**: Events you consume (return `None`) are blocked
+//! - ❌ **Pass-through fails**: Events you pass through (return `Some(event)`)
+//!   may not reach other applications
+//!
+//! **Why:** Wayland compositors use libinput which takes exclusive access to
+//! physical devices. When we grab via evdev, we intercept events before libinput
+//! sees them. Re-injecting via uinput creates events from a virtual device that
+//! libinput typically ignores for security.
+//!
+//! **Requirements for grab mode (even with limitations):**
+//! - Membership in the `input` group
+//! - Access to `/dev/uinput` (for re-injection attempts)
+//!
+//! ```bash
+//! sudo usermod -aG input $USER
+//! echo 'KERNEL=="uinput", GROUP="input", MODE="0660"' | sudo tee /etc/udev/rules.d/99-uinput.rules
+//! sudo udevadm control --reload-rules
+//! ```
+//!
+//! **Recommendation:** Use X11 instead of Wayland for full grab support, or use
+//! grab only for consuming/blocking events rather than selective pass-through.
 
 mod keycodes;
 

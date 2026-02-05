@@ -9,6 +9,7 @@ use crate::error::{Error, Result};
 use crate::event::{Button, Event, ScrollDirection};
 use crate::hook::{EventHandler, GrabHandler};
 use crate::platform::linux::keycodes::evdev_keycode_to_key;
+use crate::platform::linux::evdev::simulate::emit_event;
 use crate::state::{
     self, MASK_ALT, MASK_BUTTON1, MASK_BUTTON2, MASK_BUTTON3, MASK_BUTTON4, MASK_BUTTON5,
     MASK_CTRL, MASK_META, MASK_SHIFT,
@@ -334,12 +335,18 @@ where
                 && let Ok(events) = device.fetch_events()
             {
                 for ev in events {
-                    if let Some(event) = convert_event(&ev) {
-                        let _pass_through = callback(&event);
-                        // Note: In true grab mode, we'd need to re-inject
-                        // the event if pass_through is true. This requires
-                        // uinput which adds complexity. For now, we just
-                        // consume all events when grabbed.
+                    let pass_through = if let Some(event) = convert_event(&ev) {
+                        callback(&event)
+                    } else {
+                        // Unknown event type - pass through
+                        true
+                    };
+
+                    if pass_through {
+                        // Re-inject the original event via uinput
+                        if let Err(e) = emit_event(&ev) {
+                            log::debug!("Failed to re-inject event: {}", e);
+                        }
                     }
                 }
             }

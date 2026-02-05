@@ -117,11 +117,12 @@ fn main() {
 
 **Platform Support for Grabbing:**
 
-| Platform | Grab Support |
-|----------|--------------|
-| macOS | Full support via CGEventTap |
-| Windows | Full support via low-level hooks |
-| Linux/X11 | Falls back to listen mode (XRecord cannot grab) |
+| Platform | Grab Support | Notes |
+|----------|--------------|-------|
+| macOS | ✅ Full | Via CGEventTap |
+| Windows | ✅ Full | Via low-level hooks |
+| Linux/X11 | ⚠️ Limited | Falls back to listen mode (XRecord cannot grab) |
+| Linux/Wayland | ⚠️ Limited | See [Wayland Limitation](#wayland-limitation) below |
 
 ### Channel-Based Listening (Non-Blocking)
 
@@ -341,6 +342,23 @@ cargo build --features evdev --no-default-features
 sudo usermod -aG input $USER
 # Log out and back in for changes to take effect
 ```
+
+#### Wayland Limitation
+
+On **Wayland**, the `grab()` function has a fundamental limitation due to how Wayland compositors handle input:
+
+- ✅ **Blocking events works**: Events you choose to consume (return `None`) are properly blocked
+- ❌ **Pass-through events fail**: Events you want to pass through (return `Some(event)`) may not reach other applications
+
+**Why this happens:**
+Wayland compositors use **libinput**, which takes exclusive access to physical input devices. When we grab via evdev, we intercept events before libinput sees them. When we re-inject events via uinput (virtual device), libinput typically ignores them for security reasons.
+
+**Workarounds:**
+- Use **X11** instead of Wayland for full grab support
+- Use grab only for **consuming/blocking** events, not for selective pass-through
+- For global hotkeys on Wayland, consider using your compositor's native hotkey system
+
+This limitation affects all input libraries using evdev+uinput on Wayland, not just monio.
 
 ## Examples
 
