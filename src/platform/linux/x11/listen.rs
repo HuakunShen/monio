@@ -21,6 +21,9 @@ static HANDLER: Mutex<Option<Box<dyn EventHandler>>> = Mutex::new(None);
 /// Flag to signal stopping
 static STOP_FLAG: Mutex<Option<Arc<AtomicBool>>> = Mutex::new(None);
 
+/// XRecord context for stopping the hook
+static CONTEXT: Mutex<Option<xrecord::XRecordContext>> = Mutex::new(None);
+
 const FALSE: c_int = 0;
 
 /// XRecord data structure for events
@@ -238,6 +241,12 @@ pub fn run_hook<H: EventHandler + 'static>(running: &Arc<AtomicBool>, handler: H
 
         xlib::XSync(dpy_control, FALSE);
 
+        // Store context for stop_hook to use
+        {
+            let mut c = CONTEXT.lock().map_err(|_| Error::ThreadError("context mutex poisoned".into()))?;
+            *c = Some(context);
+        }
+
         // Send hook enabled event
         if let Ok(guard) = HANDLER.lock()
             && let Some(ref handler) = *guard
@@ -268,7 +277,7 @@ pub fn run_hook<H: EventHandler + 'static>(running: &Arc<AtomicBool>, handler: H
         }
     }
 
-    // Clean up handler
+    // Clean up handler and statics
     {
         let mut h = HANDLER
             .lock()
@@ -281,14 +290,40 @@ pub fn run_hook<H: EventHandler + 'static>(running: &Arc<AtomicBool>, handler: H
             .map_err(|_| Error::ThreadError("mutex poisoned".into()))?;
         *s = None;
     }
+    {
+        let mut c = CONTEXT
+            .lock()
+            .map_err(|_| Error::ThreadError("mutex poisoned".into()))?;
+        *c = None;
+    }
 
     Ok(())
 }
 
 /// Stop the event hook.
 pub fn stop_hook() -> Result<()> {
-    // The stop is signaled via the STOP_FLAG atomic
-    // The XRecord loop will check this and exit
+    // Signal the stop flag to tell the XRecord loop to exit
+    if let Ok(guard) = STOP_FLAG.lock()
+        && let Some(ref flag) = *guard
+    {
+        flag.store(false, Ordering::SeqCst);
+    }
+
+    // XRecordDisableContext needs to be called from a separate control display
+    // connection to unblock XRecordEnableContext on the data connection
+    unsafe {
+        if let Ok(ctx_guard) = CONTEXT.lock()
+            && let Some(ctx) = *ctx_guard
+        {
+            // Open a new display connection for the control channel
+            let dpy_control = xlib::XOpenDisplay(null());
+            if !dpy_control.is_null() {
+                xrecord::XRecordDisableContext(dpy_control, ctx);
+                xlib::XCloseDisplay(dpy_control);
+            }
+        }
+    }
+
     Ok(())
 }
 
