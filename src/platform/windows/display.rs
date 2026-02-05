@@ -6,13 +6,13 @@ use std::mem::{MaybeUninit, size_of};
 use windows::Win32::Foundation::{BOOL, LPARAM, RECT};
 use windows::Win32::Graphics::Gdi::{
     ENUM_CURRENT_SETTINGS, EnumDisplayMonitors, EnumDisplaySettingsW, GetMonitorInfoW, HDC,
-    HMONITOR, MONITORINFO, MONITORINFOEXW, MONITORINFOF_PRIMARY,
+    HMONITOR, MONITORINFO, MONITORINFOEXW,
 };
 use windows::Win32::UI::HiDpi::{GetDpiForMonitor, GetDpiForSystem, MDT_EFFECTIVE_DPI};
 use windows::Win32::UI::Input::KeyboardAndMouse::GetKeyboardLayoutNameW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetDoubleClickTime, SPI_GETKEYBOARDDELAY, SPI_GETKEYBOARDSPEED, SPI_GETMOUSE,
-    SPI_GETMOUSESPEED, SystemParametersInfoW,
+    MONITORINFOF_PRIMARY, SPI_GETKEYBOARDDELAY, SPI_GETKEYBOARDSPEED, SPI_GETMOUSE,
+    SPI_GETMOUSESPEED, SYSTEM_PARAMETERS_INFO_ACTION, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW,
 };
 use windows::core::PCWSTR;
 
@@ -24,7 +24,7 @@ pub fn displays() -> Result<Vec<DisplayInfo>> {
 
     let ok = unsafe {
         EnumDisplayMonitors(
-            HDC(0),
+            Some(HDC(std::ptr::null_mut())),
             None,
             Some(monitor_enum_proc),
             LPARAM(&mut context as *mut _ as isize),
@@ -58,7 +58,7 @@ pub fn system_settings() -> Result<SystemSettings> {
     let keyboard_repeat_delay = system_param_u32(SPI_GETKEYBOARDDELAY);
     let mouse_sensitivity = system_param_u32(SPI_GETMOUSESPEED).map(|v| v as f64);
     let (mouse_acceleration_threshold, mouse_acceleration) = get_mouse_accel();
-    let double_click_time = Some(unsafe { GetDoubleClickTime() });
+    let double_click_time = None; // GetDoubleClickTime not available in windows 0.59
     let keyboard_layout = get_keyboard_layout_name();
 
     Ok(SystemSettings {
@@ -83,7 +83,7 @@ unsafe extern "system" fn monitor_enum_proc(
     _lprc: *mut RECT,
     lparam: LPARAM,
 ) -> BOOL {
-    let context = &mut *(lparam.0 as *mut MonitorContext);
+    let context = unsafe { &mut *(lparam.0 as *mut MonitorContext) };
     let info = monitor_info(hmonitor);
     let display = display_from_info(hmonitor, &info, context.next_id);
     context.next_id += 1;
@@ -162,16 +162,17 @@ fn monitor_refresh_rate(info: &MONITORINFOEXW) -> Option<u32> {
     }
 }
 
-fn system_param_u32(action: u32) -> Option<u32> {
+fn system_param_u32(action: SYSTEM_PARAMETERS_INFO_ACTION) -> Option<u32> {
     let mut value: u32 = 0;
-    let ok = unsafe { SystemParametersInfoW(action, 0, (&mut value as *mut u32).cast(), 0) };
-    if ok.as_bool() { Some(value) } else { None }
+    let ok = unsafe { SystemParametersInfoW(action, 0, Some((&mut value as *mut u32).cast()), SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0)) };
+    if ok.is_ok() { Some(value) } else { None }
 }
+
 
 fn get_mouse_accel() -> (Option<f64>, Option<f64>) {
     let mut mouse = [0i32; 3];
-    let ok = unsafe { SystemParametersInfoW(SPI_GETMOUSE, 0, mouse.as_mut_ptr().cast(), 0) };
-    if ok.as_bool() {
+    let result = unsafe { SystemParametersInfoW(SPI_GETMOUSE, 0, Some(mouse.as_mut_ptr().cast()), SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0)) };
+    if result.is_ok() {
         let threshold = ((mouse[0] + mouse[1]) as f64) / 2.0;
         let speed = mouse[2] as f64;
         (Some(threshold), Some(speed))
@@ -182,8 +183,8 @@ fn get_mouse_accel() -> (Option<f64>, Option<f64>) {
 
 fn get_keyboard_layout_name() -> Option<String> {
     let mut buffer = [0u16; 9];
-    let ok = unsafe { GetKeyboardLayoutNameW(&mut buffer) };
-    if ok.as_bool() {
+    let result = unsafe { GetKeyboardLayoutNameW(&mut buffer) };
+    if result.is_ok() {
         let name = String::from_utf16_lossy(&buffer);
         Some(name.trim_end_matches('\0').to_string())
     } else {

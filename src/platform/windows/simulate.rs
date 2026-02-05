@@ -5,20 +5,22 @@ use crate::event::{Button, Event, EventType};
 use crate::keycode::Key;
 use std::mem::size_of;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetSystemMetrics, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYEVENTF_KEYUP,
+    INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYEVENTF_KEYUP,
     MOUSE_EVENT_FLAGS, MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_HWHEEL, MOUSEEVENTF_LEFTDOWN,
     MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_MOVE,
     MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_VIRTUALDESK, MOUSEEVENTF_WHEEL,
-    MOUSEEVENTF_XDOWN, MOUSEEVENTF_XUP, MOUSEINPUT, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN,
-    SendInput, VIRTUAL_KEY,
+    MOUSEEVENTF_XDOWN, MOUSEEVENTF_XUP, MOUSEINPUT, SendInput, VIRTUAL_KEY,
+};
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN,
 };
 
 use super::keycodes::key_to_keycode;
 
-const WHEEL_DELTA: i32 = 120;
+const WHEEL_DELTA: u32 = 120;
 
 /// Send a mouse event
-fn sim_mouse_event(flags: MOUSE_EVENT_FLAGS, data: i32, dx: i32, dy: i32) -> Result<()> {
+fn sim_mouse_event(flags: MOUSE_EVENT_FLAGS, data: u32, dx: i32, dy: i32) -> Result<()> {
     let input = INPUT {
         r#type: INPUT_MOUSE,
         Anonymous: INPUT_0 {
@@ -148,7 +150,7 @@ pub fn mouse_press(button: Button) -> Result<()> {
         Button::Middle => sim_mouse_event(MOUSEEVENTF_MIDDLEDOWN, 0, 0, 0),
         Button::Button4 => sim_mouse_event(MOUSEEVENTF_XDOWN, 1, 0, 0),
         Button::Button5 => sim_mouse_event(MOUSEEVENTF_XDOWN, 2, 0, 0),
-        Button::Unknown(code) => sim_mouse_event(MOUSEEVENTF_XDOWN, code as i32, 0, 0),
+        Button::Unknown(code) => sim_mouse_event(MOUSEEVENTF_XDOWN, code as u32, 0, 0),
     }
 }
 
@@ -160,7 +162,7 @@ pub fn mouse_release(button: Button) -> Result<()> {
         Button::Middle => sim_mouse_event(MOUSEEVENTF_MIDDLEUP, 0, 0, 0),
         Button::Button4 => sim_mouse_event(MOUSEEVENTF_XUP, 1, 0, 0),
         Button::Button5 => sim_mouse_event(MOUSEEVENTF_XUP, 2, 0, 0),
-        Button::Unknown(code) => sim_mouse_event(MOUSEEVENTF_XUP, code as i32, 0, 0),
+        Button::Unknown(code) => sim_mouse_event(MOUSEEVENTF_XUP, code as u32, 0, 0),
     }
 }
 
@@ -194,10 +196,10 @@ pub fn mouse_move(x: f64, y: f64) -> Result<()> {
 /// Scroll the mouse wheel.
 pub fn mouse_scroll(delta_y: i32, delta_x: i32) -> Result<()> {
     if delta_y != 0 {
-        sim_mouse_event(MOUSEEVENTF_WHEEL, delta_y * WHEEL_DELTA, 0, 0)?;
+        sim_mouse_event(MOUSEEVENTF_WHEEL, (delta_y as i32).wrapping_mul(WHEEL_DELTA as i32) as u32, 0, 0)?;
     }
     if delta_x != 0 {
-        sim_mouse_event(MOUSEEVENTF_HWHEEL, delta_x * WHEEL_DELTA, 0, 0)?;
+        sim_mouse_event(MOUSEEVENTF_HWHEEL, (delta_x as i32).wrapping_mul(WHEEL_DELTA as i32) as u32, 0, 0)?;
     }
     Ok(())
 }

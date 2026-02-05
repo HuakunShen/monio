@@ -144,8 +144,7 @@ fn main() {
     println!("  - Q key (completely blocked)");
     println!("  - W key (completely blocked)");
     println!("  - E key (completely blocked)");
-    println!("  - Left mouse click (completely blocked)");
-    println!("\nTry typing q, w, e or left-clicking - they won't work in other apps!");
+    println!("\nTry typing q, w, or e - they won't work in other apps!");
     println!("Press Ctrl+C to exit.\n");
 
     if let Err(e) = grab(|event: &Event| {
@@ -180,11 +179,7 @@ fn main() {
             }
             EventType::MousePressed => {
                 if let Some(mouse) = &event.mouse {
-                    if mouse.button == Some(monio::Button::Left) {
-                        let count = BLOCKED_COUNT.fetch_add(1, Ordering::SeqCst) + 1;
-                        println!("BLOCKED Left mouse click! (total blocked: {})", count);
-                        return None; // Consume - block the click
-                    }
+                    // All mouse buttons pass through (not blocked)
                     println!(
                         "Mouse {:?} pressed at ({:.0}, {:.0}) - passing through",
                         mouse.button, mouse.x, mouse.y

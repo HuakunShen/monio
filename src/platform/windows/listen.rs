@@ -7,10 +7,19 @@ use crate::state::{
     self, MASK_ALT, MASK_BUTTON1, MASK_BUTTON2, MASK_BUTTON3, MASK_BUTTON4, MASK_BUTTON5,
     MASK_CTRL, MASK_META, MASK_SHIFT,
 };
-use std::ptr::null_mut;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+
+// Wrapper for HHOOK to make it Send + Sync
+#[derive(Clone, Copy)]
+struct SendableHHOOK(HHOOK);
+
+// SAFETY: HHOOK is just a handle/pointer that the Windows API owns.
+// It's safe to send between threads because Windows handles are thread-safe.
+unsafe impl Send for SendableHHOOK {}
+unsafe impl Sync for SendableHHOOK {}
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
+use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, GetMessageW, HC_ACTION, HHOOK, KBDLLHOOKSTRUCT, MSLLHOOKSTRUCT,
     PostThreadMessageW, SetWindowsHookExW, UnhookWindowsHookEx, WH_KEYBOARD_LL, WH_MOUSE_LL,
@@ -34,8 +43,8 @@ static GRAB_HANDLER: Mutex<Option<Box<dyn GrabHandler>>> = Mutex::new(None);
 static STOP_FLAG: Mutex<Option<Arc<AtomicBool>>> = Mutex::new(None);
 
 /// Hook handles
-static KEYBOARD_HOOK: Mutex<Option<HHOOK>> = Mutex::new(None);
-static MOUSE_HOOK: Mutex<Option<HHOOK>> = Mutex::new(None);
+static KEYBOARD_HOOK: Mutex<Option<SendableHHOOK>> = Mutex::new(None);
+static MOUSE_HOOK: Mutex<Option<SendableHHOOK>> = Mutex::new(None);
 
 /// Thread ID for message posting
 static THREAD_ID: Mutex<u32> = Mutex::new(0);
@@ -62,25 +71,25 @@ fn update_key_modifier(code: u32, pressed: bool) {
 
 /// Get VK code from KBDLLHOOKSTRUCT
 unsafe fn get_vk_code(lpdata: LPARAM) -> u32 {
-    let kb = *(lpdata.0 as *const KBDLLHOOKSTRUCT);
+    let kb = unsafe { *(lpdata.0 as *const KBDLLHOOKSTRUCT) };
     kb.vkCode
 }
 
 /// Get point from MSLLHOOKSTRUCT
 unsafe fn get_mouse_point(lpdata: LPARAM) -> (i32, i32) {
-    let mouse = *(lpdata.0 as *const MSLLHOOKSTRUCT);
+    let mouse = unsafe { *(lpdata.0 as *const MSLLHOOKSTRUCT) };
     (mouse.pt.x, mouse.pt.y)
 }
 
 /// Get wheel delta from MSLLHOOKSTRUCT
 unsafe fn get_wheel_delta(lpdata: LPARAM) -> i16 {
-    let mouse = *(lpdata.0 as *const MSLLHOOKSTRUCT);
+    let mouse = unsafe { *(lpdata.0 as *const MSLLHOOKSTRUCT) };
     ((mouse.mouseData >> 16) & 0xFFFF) as i16
 }
 
 /// Get X button code from MSLLHOOKSTRUCT
 unsafe fn get_xbutton_code(lpdata: LPARAM) -> u8 {
-    let mouse = *(lpdata.0 as *const MSLLHOOKSTRUCT);
+    let mouse = unsafe { *(lpdata.0 as *const MSLLHOOKSTRUCT) };
     ((mouse.mouseData >> 16) & 0xFFFF) as u8
 }
 
@@ -90,14 +99,14 @@ unsafe fn convert_event(wparam: WPARAM, lparam: LPARAM) -> Option<Event> {
 
     match msg {
         WM_KEYDOWN | WM_SYSKEYDOWN => {
-            let code = get_vk_code(lparam);
+            let code = unsafe { get_vk_code(lparam) };
             update_key_modifier(code, true);
             let key = keycode_to_key(code as u16);
             Some(Event::key_pressed(key, code))
         }
 
         WM_KEYUP | WM_SYSKEYUP => {
-            let code = get_vk_code(lparam);
+            let code = unsafe { get_vk_code(lparam) };
             update_key_modifier(code, false);
             let key = keycode_to_key(code as u16);
             Some(Event::key_released(key, code))
@@ -105,42 +114,42 @@ unsafe fn convert_event(wparam: WPARAM, lparam: LPARAM) -> Option<Event> {
 
         WM_LBUTTONDOWN => {
             state::set_mask(MASK_BUTTON1);
-            let (x, y) = get_mouse_point(lparam);
+            let (x, y) = unsafe { get_mouse_point(lparam) };
             Some(Event::mouse_pressed(Button::Left, x as f64, y as f64))
         }
 
         WM_LBUTTONUP => {
             state::unset_mask(MASK_BUTTON1);
-            let (x, y) = get_mouse_point(lparam);
+            let (x, y) = unsafe { get_mouse_point(lparam) };
             Some(Event::mouse_released(Button::Left, x as f64, y as f64))
         }
 
         WM_RBUTTONDOWN => {
             state::set_mask(MASK_BUTTON2);
-            let (x, y) = get_mouse_point(lparam);
+            let (x, y) = unsafe { get_mouse_point(lparam) };
             Some(Event::mouse_pressed(Button::Right, x as f64, y as f64))
         }
 
         WM_RBUTTONUP => {
             state::unset_mask(MASK_BUTTON2);
-            let (x, y) = get_mouse_point(lparam);
+            let (x, y) = unsafe { get_mouse_point(lparam) };
             Some(Event::mouse_released(Button::Right, x as f64, y as f64))
         }
 
         WM_MBUTTONDOWN => {
             state::set_mask(MASK_BUTTON3);
-            let (x, y) = get_mouse_point(lparam);
+            let (x, y) = unsafe { get_mouse_point(lparam) };
             Some(Event::mouse_pressed(Button::Middle, x as f64, y as f64))
         }
 
         WM_MBUTTONUP => {
             state::unset_mask(MASK_BUTTON3);
-            let (x, y) = get_mouse_point(lparam);
+            let (x, y) = unsafe { get_mouse_point(lparam) };
             Some(Event::mouse_released(Button::Middle, x as f64, y as f64))
         }
 
         WM_XBUTTONDOWN => {
-            let xbutton = get_xbutton_code(lparam);
+            let xbutton = unsafe { get_xbutton_code(lparam) };
             let (button, mask) = match xbutton {
                 1 => (Button::Button4, MASK_BUTTON4),
                 2 => (Button::Button5, MASK_BUTTON5),
@@ -149,12 +158,12 @@ unsafe fn convert_event(wparam: WPARAM, lparam: LPARAM) -> Option<Event> {
             if mask != 0 {
                 state::set_mask(mask);
             }
-            let (x, y) = get_mouse_point(lparam);
+            let (x, y) = unsafe { get_mouse_point(lparam) };
             Some(Event::mouse_pressed(button, x as f64, y as f64))
         }
 
         WM_XBUTTONUP => {
-            let xbutton = get_xbutton_code(lparam);
+            let xbutton = unsafe { get_xbutton_code(lparam) };
             let (button, mask) = match xbutton {
                 1 => (Button::Button4, MASK_BUTTON4),
                 2 => (Button::Button5, MASK_BUTTON5),
@@ -163,12 +172,12 @@ unsafe fn convert_event(wparam: WPARAM, lparam: LPARAM) -> Option<Event> {
             if mask != 0 {
                 state::unset_mask(mask);
             }
-            let (x, y) = get_mouse_point(lparam);
+            let (x, y) = unsafe { get_mouse_point(lparam) };
             Some(Event::mouse_released(button, x as f64, y as f64))
         }
 
         WM_MOUSEMOVE => {
-            let (x, y) = get_mouse_point(lparam);
+            let (x, y) = unsafe { get_mouse_point(lparam) };
             // THE KEY FIX: Check button state for drag detection
             if state::is_button_held() {
                 Some(Event::mouse_dragged(x as f64, y as f64))
@@ -178,8 +187,8 @@ unsafe fn convert_event(wparam: WPARAM, lparam: LPARAM) -> Option<Event> {
         }
 
         WM_MOUSEWHEEL => {
-            let (x, y) = get_mouse_point(lparam);
-            let delta = get_wheel_delta(lparam);
+            let (x, y) = unsafe { get_mouse_point(lparam) };
+            let delta = unsafe { get_wheel_delta(lparam) };
             let delta_units = delta as f64 / WHEEL_DELTA as f64;
             let (direction, abs_delta) = if delta > 0 {
                 (ScrollDirection::Up, delta_units)
@@ -190,8 +199,8 @@ unsafe fn convert_event(wparam: WPARAM, lparam: LPARAM) -> Option<Event> {
         }
 
         WM_MOUSEHWHEEL => {
-            let (x, y) = get_mouse_point(lparam);
-            let delta = get_wheel_delta(lparam);
+            let (x, y) = unsafe { get_mouse_point(lparam) };
+            let delta = unsafe { get_wheel_delta(lparam) };
             let delta_units = delta as f64 / WHEEL_DELTA as f64;
             let (direction, abs_delta) = if delta > 0 {
                 (ScrollDirection::Right, delta_units)
@@ -214,13 +223,13 @@ unsafe extern "system" fn keyboard_callback(code: i32, wparam: WPARAM, lparam: L
                 if !flag.load(Ordering::SeqCst) {
                     // Stop requested
                     if let Ok(thread_id) = THREAD_ID.lock() {
-                        let _ = PostThreadMessageW(*thread_id, WM_QUIT, WPARAM(0), LPARAM(0));
+                        let _ = unsafe { PostThreadMessageW(*thread_id, WM_QUIT, WPARAM(0), LPARAM(0)) };
                     }
                 }
             }
         }
 
-        if let Some(event) = convert_event(wparam, lparam) {
+        if let Some(event) = unsafe { convert_event(wparam, lparam) } {
             // Check if we're in grab mode
             if GRAB_MODE.load(Ordering::SeqCst) {
                 if let Ok(guard) = GRAB_HANDLER.lock() {
@@ -242,8 +251,8 @@ unsafe extern "system" fn keyboard_callback(code: i32, wparam: WPARAM, lparam: L
         }
     }
 
-    let hook = KEYBOARD_HOOK.lock().ok().and_then(|g| *g);
-    CallNextHookEx(hook, code, wparam, lparam)
+    let hook = KEYBOARD_HOOK.lock().ok().and_then(|g| g.map(|h| h.0));
+    unsafe { CallNextHookEx(hook, code, wparam, lparam) }
 }
 
 /// Mouse hook callback
@@ -255,13 +264,13 @@ unsafe extern "system" fn mouse_callback(code: i32, wparam: WPARAM, lparam: LPAR
                 if !flag.load(Ordering::SeqCst) {
                     // Stop requested
                     if let Ok(thread_id) = THREAD_ID.lock() {
-                        let _ = PostThreadMessageW(*thread_id, WM_QUIT, WPARAM(0), LPARAM(0));
+                        let _ = unsafe { PostThreadMessageW(*thread_id, WM_QUIT, WPARAM(0), LPARAM(0)) };
                     }
                 }
             }
         }
 
-        if let Some(event) = convert_event(wparam, lparam) {
+        if let Some(event) = unsafe { convert_event(wparam, lparam) } {
             // Check if we're in grab mode
             if GRAB_MODE.load(Ordering::SeqCst) {
                 if let Ok(guard) = GRAB_HANDLER.lock() {
@@ -283,8 +292,8 @@ unsafe extern "system" fn mouse_callback(code: i32, wparam: WPARAM, lparam: LPAR
         }
     }
 
-    let hook = MOUSE_HOOK.lock().ok().and_then(|g| *g);
-    CallNextHookEx(hook, code, wparam, lparam)
+    let hook = MOUSE_HOOK.lock().ok().and_then(|g| g.map(|h| h.0));
+    unsafe { CallNextHookEx(hook, code, wparam, lparam) }
 }
 
 /// Run the event hook (blocking).
@@ -308,7 +317,7 @@ pub fn run_hook<H: EventHandler + 'static>(running: &Arc<AtomicBool>, handler: H
         let mut tid = THREAD_ID
             .lock()
             .map_err(|_| Error::ThreadError("mutex poisoned".into()))?;
-        *tid = unsafe { windows::Win32::System::Threading::GetCurrentThreadId() };
+        *tid = unsafe { GetCurrentThreadId() };
     }
 
     // Set up keyboard hook
@@ -320,7 +329,7 @@ pub fn run_hook<H: EventHandler + 'static>(running: &Arc<AtomicBool>, handler: H
         let mut kh = KEYBOARD_HOOK
             .lock()
             .map_err(|_| Error::ThreadError("mutex poisoned".into()))?;
-        *kh = Some(keyboard_hook);
+        *kh = Some(SendableHHOOK(keyboard_hook));
     }
 
     // Set up mouse hook
@@ -332,7 +341,7 @@ pub fn run_hook<H: EventHandler + 'static>(running: &Arc<AtomicBool>, handler: H
         let mut mh = MOUSE_HOOK
             .lock()
             .map_err(|_| Error::ThreadError("mutex poisoned".into()))?;
-        *mh = Some(mouse_hook);
+        *mh = Some(SendableHHOOK(mouse_hook));
     }
 
     // Send hook enabled event
@@ -372,12 +381,12 @@ pub fn run_hook<H: EventHandler + 'static>(running: &Arc<AtomicBool>, handler: H
     unsafe {
         if let Ok(mut kh) = KEYBOARD_HOOK.lock() {
             if let Some(hook) = kh.take() {
-                let _ = UnhookWindowsHookEx(hook);
+                let _ = UnhookWindowsHookEx(hook.0);
             }
         }
         if let Ok(mut mh) = MOUSE_HOOK.lock() {
             if let Some(hook) = mh.take() {
-                let _ = UnhookWindowsHookEx(hook);
+                let _ = UnhookWindowsHookEx(hook.0);
             }
         }
     }
@@ -428,7 +437,7 @@ pub fn run_grab_hook<H: GrabHandler + 'static>(
         let mut tid = THREAD_ID
             .lock()
             .map_err(|_| Error::ThreadError("mutex poisoned".into()))?;
-        *tid = unsafe { windows::Win32::System::Threading::GetCurrentThreadId() };
+        *tid = unsafe { GetCurrentThreadId() };
     }
 
     // Set up keyboard hook
@@ -440,7 +449,7 @@ pub fn run_grab_hook<H: GrabHandler + 'static>(
         let mut kh = KEYBOARD_HOOK
             .lock()
             .map_err(|_| Error::ThreadError("mutex poisoned".into()))?;
-        *kh = Some(keyboard_hook);
+        *kh = Some(SendableHHOOK(keyboard_hook));
     }
 
     // Set up mouse hook
@@ -452,7 +461,7 @@ pub fn run_grab_hook<H: GrabHandler + 'static>(
         let mut mh = MOUSE_HOOK
             .lock()
             .map_err(|_| Error::ThreadError("mutex poisoned".into()))?;
-        *mh = Some(mouse_hook);
+        *mh = Some(SendableHHOOK(mouse_hook));
     }
 
     // Send hook enabled event
@@ -492,12 +501,12 @@ pub fn run_grab_hook<H: GrabHandler + 'static>(
     unsafe {
         if let Ok(mut kh) = KEYBOARD_HOOK.lock() {
             if let Some(hook) = kh.take() {
-                let _ = UnhookWindowsHookEx(hook);
+                let _ = UnhookWindowsHookEx(hook.0);
             }
         }
         if let Ok(mut mh) = MOUSE_HOOK.lock() {
             if let Some(hook) = mh.take() {
-                let _ = UnhookWindowsHookEx(hook);
+                let _ = UnhookWindowsHookEx(hook.0);
             }
         }
     }
