@@ -12,7 +12,8 @@ use windows::Win32::UI::HiDpi::{GetDpiForMonitor, GetDpiForSystem, MDT_EFFECTIVE
 use windows::Win32::UI::Input::KeyboardAndMouse::GetKeyboardLayoutNameW;
 use windows::Win32::UI::WindowsAndMessaging::{
     MONITORINFOF_PRIMARY, SPI_GETKEYBOARDDELAY, SPI_GETKEYBOARDSPEED, SPI_GETMOUSE,
-    SPI_GETMOUSESPEED, SYSTEM_PARAMETERS_INFO_ACTION, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW,
+    SPI_GETMOUSESPEED, SYSTEM_PARAMETERS_INFO_ACTION, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
+    SystemParametersInfoW,
 };
 use windows::core::PCWSTR;
 
@@ -164,14 +165,27 @@ fn monitor_refresh_rate(info: &MONITORINFOEXW) -> Option<u32> {
 
 fn system_param_u32(action: SYSTEM_PARAMETERS_INFO_ACTION) -> Option<u32> {
     let mut value: u32 = 0;
-    let ok = unsafe { SystemParametersInfoW(action, 0, Some((&mut value as *mut u32).cast()), SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0)) };
+    let ok = unsafe {
+        SystemParametersInfoW(
+            action,
+            0,
+            Some((&mut value as *mut u32).cast()),
+            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        )
+    };
     if ok.is_ok() { Some(value) } else { None }
 }
 
-
 fn get_mouse_accel() -> (Option<f64>, Option<f64>) {
     let mut mouse = [0i32; 3];
-    let result = unsafe { SystemParametersInfoW(SPI_GETMOUSE, 0, Some(mouse.as_mut_ptr().cast()), SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0)) };
+    let result = unsafe {
+        SystemParametersInfoW(
+            SPI_GETMOUSE,
+            0,
+            Some(mouse.as_mut_ptr().cast()),
+            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        )
+    };
     if result.is_ok() {
         let threshold = ((mouse[0] + mouse[1]) as f64) / 2.0;
         let speed = mouse[2] as f64;

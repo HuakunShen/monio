@@ -243,7 +243,9 @@ pub fn run_hook<H: EventHandler + 'static>(running: &Arc<AtomicBool>, handler: H
 
         // Store context for stop_hook to use
         {
-            let mut c = CONTEXT.lock().map_err(|_| Error::ThreadError("context mutex poisoned".into()))?;
+            let mut c = CONTEXT
+                .lock()
+                .map_err(|_| Error::ThreadError("context mutex poisoned".into()))?;
             *c = Some(context);
         }
 

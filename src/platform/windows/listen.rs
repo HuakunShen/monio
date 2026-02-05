@@ -223,7 +223,9 @@ unsafe extern "system" fn keyboard_callback(code: i32, wparam: WPARAM, lparam: L
                 if !flag.load(Ordering::SeqCst) {
                     // Stop requested
                     if let Ok(thread_id) = THREAD_ID.lock() {
-                        let _ = unsafe { PostThreadMessageW(*thread_id, WM_QUIT, WPARAM(0), LPARAM(0)) };
+                        let _ = unsafe {
+                            PostThreadMessageW(*thread_id, WM_QUIT, WPARAM(0), LPARAM(0))
+                        };
                     }
                 }
             }
@@ -264,7 +266,9 @@ unsafe extern "system" fn mouse_callback(code: i32, wparam: WPARAM, lparam: LPAR
                 if !flag.load(Ordering::SeqCst) {
                     // Stop requested
                     if let Ok(thread_id) = THREAD_ID.lock() {
-                        let _ = unsafe { PostThreadMessageW(*thread_id, WM_QUIT, WPARAM(0), LPARAM(0)) };
+                        let _ = unsafe {
+                            PostThreadMessageW(*thread_id, WM_QUIT, WPARAM(0), LPARAM(0))
+                        };
                     }
                 }
             }

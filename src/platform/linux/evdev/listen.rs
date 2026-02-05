@@ -8,8 +8,8 @@
 use crate::error::{Error, Result};
 use crate::event::{Button, Event, ScrollDirection};
 use crate::hook::{EventHandler, GrabHandler};
-use crate::platform::linux::keycodes::evdev_keycode_to_key;
 use crate::platform::linux::evdev::simulate::emit_event;
+use crate::platform::linux::keycodes::evdev_keycode_to_key;
 use crate::state::{
     self, MASK_ALT, MASK_BUTTON1, MASK_BUTTON2, MASK_BUTTON3, MASK_BUTTON4, MASK_BUTTON5,
     MASK_CTRL, MASK_META, MASK_SHIFT,

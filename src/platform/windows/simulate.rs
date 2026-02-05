@@ -5,11 +5,11 @@ use crate::event::{Button, Event, EventType};
 use crate::keycode::Key;
 use std::mem::size_of;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYEVENTF_KEYUP,
-    MOUSE_EVENT_FLAGS, MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_HWHEEL, MOUSEEVENTF_LEFTDOWN,
-    MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_MOVE,
-    MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_VIRTUALDESK, MOUSEEVENTF_WHEEL,
-    MOUSEEVENTF_XDOWN, MOUSEEVENTF_XUP, MOUSEINPUT, SendInput, VIRTUAL_KEY,
+    INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYEVENTF_KEYUP, MOUSE_EVENT_FLAGS,
+    MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_HWHEEL, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP,
+    MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_MOVE, MOUSEEVENTF_RIGHTDOWN,
+    MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_VIRTUALDESK, MOUSEEVENTF_WHEEL, MOUSEEVENTF_XDOWN,
+    MOUSEEVENTF_XUP, MOUSEINPUT, SendInput, VIRTUAL_KEY,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN,
@@ -196,10 +196,20 @@ pub fn mouse_move(x: f64, y: f64) -> Result<()> {
 /// Scroll the mouse wheel.
 pub fn mouse_scroll(delta_y: i32, delta_x: i32) -> Result<()> {
     if delta_y != 0 {
-        sim_mouse_event(MOUSEEVENTF_WHEEL, (delta_y as i32).wrapping_mul(WHEEL_DELTA as i32) as u32, 0, 0)?;
+        sim_mouse_event(
+            MOUSEEVENTF_WHEEL,
+            (delta_y as i32).wrapping_mul(WHEEL_DELTA as i32) as u32,
+            0,
+            0,
+        )?;
     }
     if delta_x != 0 {
-        sim_mouse_event(MOUSEEVENTF_HWHEEL, (delta_x as i32).wrapping_mul(WHEEL_DELTA as i32) as u32, 0, 0)?;
+        sim_mouse_event(
+            MOUSEEVENTF_HWHEEL,
+            (delta_x as i32).wrapping_mul(WHEEL_DELTA as i32) as u32,
+            0,
+            0,
+        )?;
     }
     Ok(())
 }

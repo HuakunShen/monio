@@ -32,12 +32,12 @@ pub(crate) fn emit_event(ev: &InputEvent) -> Result<()> {
     let event_type = ev.event_type();
     let code = ev.code();
     let value = ev.value();
-    
+
     let events = [
         InputEvent::new(event_type, code, value),
         InputEvent::new(EvdevEventType::SYNCHRONIZATION, 0, 0),
     ];
-    
+
     device
         .emit(&events)
         .map_err(|e| Error::SimulateFailed(format!("Failed to emit event: {}", e)))?;

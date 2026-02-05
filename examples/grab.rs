@@ -39,7 +39,7 @@ fn check_linux_permissions() {
     #[cfg(target_os = "linux")]
     {
         use std::process::Command;
-        
+
         // Check if we're on Wayland
         let is_wayland = std::env::var("WAYLAND_DISPLAY").is_ok();
         if is_wayland {
@@ -50,24 +50,26 @@ fn check_linux_permissions() {
             eprintln!("   This is a fundamental limitation of evdev+ uinput on Wayland.");
             eprintln!();
         }
-        
+
         // Check system groups (what you'll have after re-login)
         let output = Command::new("id")
             .arg("-Gn")
             .output()
             .ok()
             .and_then(|o| String::from_utf8(o.stdout).ok());
-        
+
         let has_input_group = output.as_ref().map_or(false, |g| g.contains("input"));
-        
+
         // Check current process groups (active now)
         let current_groups = Command::new("groups")
             .output()
             .ok()
             .and_then(|o| String::from_utf8(o.stdout).ok());
-        
-        let currently_has_input = current_groups.as_ref().map_or(false, |g| g.contains("input"));
-        
+
+        let currently_has_input = current_groups
+            .as_ref()
+            .map_or(false, |g| g.contains("input"));
+
         if has_input_group && !currently_has_input {
             eprintln!("⚠️  You are in the 'input' group, but the change hasn't taken effect yet.");
             eprintln!("   Please log out and log back in, or run: newgrp input");
@@ -87,39 +89,47 @@ fn check_linux_permissions() {
                 eprintln!("   This should be fixed after adding yourself to the 'input' group.");
             } else {
                 eprintln!("   You may need to create a udev rule:");
-                eprintln!("   echo 'SUBSYSTEM==\"input\", GROUP=\"input\", MODE=\"660\"' | sudo tee /etc/udev/rules.d/99-input.rules");
+                eprintln!(
+                    "   echo 'SUBSYSTEM==\"input\", GROUP=\"input\", MODE=\"660\"' | sudo tee /etc/udev/rules.d/99-input.rules"
+                );
             }
             eprintln!();
         }
 
         // Check uinput access
         use std::os::unix::fs::MetadataExt;
-        
+
         let uinput_metadata = std::fs::metadata("/dev/uinput").ok();
-        let (uinput_uid, uinput_mode) = uinput_metadata.as_ref().map_or((0, 0), |m| {
-            (m.uid(), m.mode() & 0o777)
-        });
-        
+        let (uinput_uid, uinput_mode) = uinput_metadata
+            .as_ref()
+            .map_or((0, 0), |m| (m.uid(), m.mode() & 0o777));
+
         // uinput is often root:root 0600 - need udev rule to change it
         let uinput_needs_rule = uinput_uid == 0 && uinput_mode == 0o600;
-        
+
         if uinput_needs_rule {
             eprintln!("⚠️  CRITICAL: /dev/uinput is root-only (mode 0600).");
             eprintln!("   Grab mode requires uinput access to re-inject events.");
             eprintln!("   Create this udev rule (copy & paste the entire block):");
             eprintln!();
-            eprintln!("   echo 'KERNEL==\"uinput\", GROUP=\"input\", MODE=\"0660\"' | sudo tee /etc/udev/rules.d/99-uinput.rules");
+            eprintln!(
+                "   echo 'KERNEL==\"uinput\", GROUP=\"input\", MODE=\"0660\"' | sudo tee /etc/udev/rules.d/99-uinput.rules"
+            );
             eprintln!("   sudo udevadm control --reload-rules");
             eprintln!("   sudo udevadm trigger --subsystem-match=input");
             eprintln!();
-            eprintln!("   Then log out and back in (or run: sudo chmod 660 /dev/uinput for immediate test)");
+            eprintln!(
+                "   Then log out and back in (or run: sudo chmod 660 /dev/uinput for immediate test)"
+            );
             eprintln!();
         }
-        
+
         // Quick fix attempt: try newgrp
         if has_input_group && !currently_has_input {
             eprintln!("💡 Quick fix: Try running this example with 'newgrp input':");
-            eprintln!("   newgrp input -c 'cargo run --example grab --features evdev --no-default-features'");
+            eprintln!(
+                "   newgrp input -c 'cargo run --example grab --features evdev --no-default-features'"
+            );
             eprintln!();
         }
     }
@@ -129,9 +139,9 @@ fn main() {
     println!("monio grab example");
     println!("===================\n");
     println!("Display server: {}\n", get_display_server());
-    
+
     check_linux_permissions();
-    
+
     // Safety timeout: auto-exit after 10 seconds
     thread::spawn(move || {
         thread::sleep(Duration::from_secs(10));
@@ -139,7 +149,7 @@ fn main() {
         std::process::exit(0);
     });
     println!("Auto-exit in 10 seconds (safety timeout)\n");
-    
+
     println!("This example blocks the following:");
     println!("  - Q key (completely blocked)");
     println!("  - W key (completely blocked)");
