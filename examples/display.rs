@@ -7,11 +7,11 @@ fn main() -> monio::Result<()> {
     let all = displays()?;
     println!("Displays ({})", all.len());
     for display in all {
-        println!("  {display:?}");
+        println!("  {display:#?}");
     }
 
     let settings = system_settings()?;
-    println!("System settings: {settings:?}");
+    println!("System settings: {settings:#?}");
 
     Ok(())
 }
