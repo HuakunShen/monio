@@ -2,7 +2,7 @@
 
 use crate::display::{DisplayInfo, Rect, SystemSettings};
 use crate::error::{Error, Result};
-use std::mem::{MaybeUninit, size_of};
+use std::mem::size_of;
 use windows::Win32::Foundation::{BOOL, LPARAM, RECT};
 use windows::Win32::Graphics::Gdi::{
     ENUM_CURRENT_SETTINGS, EnumDisplayMonitors, EnumDisplaySettingsW, GetMonitorInfoW, HDC,
@@ -150,8 +150,8 @@ fn monitor_dpi_scale(hmonitor: HMONITOR) -> Option<f64> {
 }
 
 fn monitor_refresh_rate(info: &MONITORINFOEXW) -> Option<u32> {
-    let mut devmode =
-        unsafe { MaybeUninit::<windows::Win32::Graphics::Gdi::DEVMODEW>::zeroed().assume_init() };
+    // SAFETY: DEVMODEW is a C struct with primitive types only, and zero is a valid state.
+    let mut devmode: windows::Win32::Graphics::Gdi::DEVMODEW = unsafe { std::mem::zeroed() };
     devmode.dmSize = size_of::<windows::Win32::Graphics::Gdi::DEVMODEW>() as u16;
 
     let device = PCWSTR(info.szDevice.as_ptr());

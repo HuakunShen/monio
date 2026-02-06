@@ -71,14 +71,36 @@ pub fn system_settings() -> Result<SystemSettings> {
     })
 }
 
+/// RAII wrapper to ensure display is always closed.
+struct DisplayGuard(*mut xlib::Display);
+
+impl DisplayGuard {
+    fn new(display: *mut xlib::Display) -> Option<Self> {
+        if display.is_null() {
+            None
+        } else {
+            Some(Self(display))
+        }
+    }
+
+    fn as_ptr(&self) -> *mut xlib::Display {
+        self.0
+    }
+}
+
+impl Drop for DisplayGuard {
+    fn drop(&mut self) {
+        unsafe {
+            xlib::XCloseDisplay(self.0);
+        }
+    }
+}
+
 fn with_display<T>(f: impl FnOnce(*mut xlib::Display) -> Result<T>) -> Result<T> {
     unsafe {
         let display = xlib::XOpenDisplay(null());
-        if display.is_null() {
-            return Err(Error::Platform("XOpenDisplay failed".into()));
-        }
-        let result = f(display);
-        xlib::XCloseDisplay(display);
-        result
+        let guard = DisplayGuard::new(display)
+            .ok_or_else(|| Error::Platform("XOpenDisplay failed".into()))?;
+        f(guard.as_ptr())
     }
 }

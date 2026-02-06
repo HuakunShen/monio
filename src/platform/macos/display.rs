@@ -118,6 +118,7 @@ fn pref_number_i64(key: &str) -> Option<i64> {
     }?;
     let number = value.downcast::<CFNumber>().ok()?;
     let mut out: i64 = 0;
+    // SAFETY: `out` is a valid i64 and the pointer is properly aligned
     let ok = unsafe { number.value(CFNumberType::SInt64Type, &mut out as *mut _ as *mut _) };
     if ok { Some(out) } else { None }
 }
@@ -134,6 +135,7 @@ fn pref_number_f64(key: &str) -> Option<f64> {
     }?;
     let number = value.downcast::<CFNumber>().ok()?;
     let mut out: f64 = 0.0;
+    // SAFETY: `out` is a valid f64 and the pointer is properly aligned
     let ok = unsafe { number.value(CFNumberType::Float64Type, &mut out as *mut _ as *mut _) };
     if ok { Some(out) } else { None }
 }
