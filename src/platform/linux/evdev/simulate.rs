@@ -228,6 +228,16 @@ pub fn mouse_click(button: Button) -> Result<()> {
 
 /// Move the mouse to a position.
 ///
+/// Get current mouse position.
+///
+/// Note: evdev does not support querying cursor position directly.
+/// This function is not supported on the evdev backend.
+pub fn mouse_position() -> Result<(f64, f64)> {
+    Err(Error::NotSupported(
+        "mouse_position is not supported on evdev backend. Use X11 backend instead.".into(),
+    ))
+}
+
 /// Note: evdev uses relative motion, so we move by the delta.
 /// For absolute positioning, the cursor needs to already be at (0,0)
 /// or we need to track current position (which is complex).

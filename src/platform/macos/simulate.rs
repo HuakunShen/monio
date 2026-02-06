@@ -17,6 +17,12 @@ use super::keycodes::key_to_keycode;
 /// Track the current modifier flags for simulation
 static SIM_FLAGS: Mutex<CGEventFlags> = Mutex::new(CGEventFlags(0));
 
+/// Get current mouse position as (x, y) coordinates.
+pub fn mouse_position() -> Result<(f64, f64)> {
+    let point = get_current_mouse_location()?;
+    Ok((point.x, point.y))
+}
+
 /// Get current mouse location
 fn get_current_mouse_location() -> Result<CGPoint> {
     unsafe {

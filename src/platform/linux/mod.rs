@@ -135,6 +135,12 @@ mod stub {
         ))
     }
 
+    pub fn mouse_position() -> Result<(f64, f64)> {
+        Err(Error::NotSupported(
+            "No Linux backend enabled. Enable 'x11' or 'evdev' feature.".into(),
+        ))
+    }
+
     pub fn mouse_move(_x: f64, _y: f64) -> Result<()> {
         Err(Error::NotSupported(
             "No Linux backend enabled. Enable 'x11' or 'evdev' feature.".into(),

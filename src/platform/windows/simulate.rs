@@ -4,6 +4,7 @@ use crate::error::{Error, Result};
 use crate::event::{Button, Event, EventType};
 use crate::keycode::Key;
 use std::mem::size_of;
+use windows::Win32::Foundation::POINT;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYEVENTF_KEYUP, MOUSE_EVENT_FLAGS,
     MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_HWHEEL, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP,
@@ -12,12 +13,22 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     MOUSEEVENTF_XUP, MOUSEINPUT, SendInput, VIRTUAL_KEY,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN,
+    GetCursorPos, GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN,
 };
 
 use super::keycodes::key_to_keycode;
 
 const WHEEL_DELTA: u32 = 120;
+
+/// Get current mouse position as (x, y) coordinates.
+pub fn mouse_position() -> Result<(f64, f64)> {
+    let mut point = POINT { x: 0, y: 0 };
+    unsafe {
+        GetCursorPos(&mut point)
+            .map_err(|e| Error::SimulateFailed(format!("Failed to get cursor position: {}", e)))?;
+    }
+    Ok((point.x as f64, point.y as f64))
+}
 
 /// Send a mouse event
 fn sim_mouse_event(flags: MOUSE_EVENT_FLAGS, data: u32, dx: i32, dy: i32) -> Result<()> {

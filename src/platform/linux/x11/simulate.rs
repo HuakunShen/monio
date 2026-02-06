@@ -13,6 +13,43 @@ use crate::platform::linux::keycodes::key_to_keycode;
 const TRUE: c_int = 1;
 const FALSE: c_int = 0;
 
+/// Get current mouse position as (x, y) coordinates.
+pub fn mouse_position() -> Result<(f64, f64)> {
+    let display = open_display()?;
+    let screen = unsafe { xlib::XDefaultScreen(display) };
+    let root = unsafe { xlib::XRootWindow(display, screen) };
+
+    let mut root_return = 0u64;
+    let mut child_return = 0u64;
+    let mut root_x: c_int = 0;
+    let mut root_y: c_int = 0;
+    let mut win_x: c_int = 0;
+    let mut win_y: c_int = 0;
+    let mut mask: u32 = 0;
+
+    let result = unsafe {
+        xlib::XQueryPointer(
+            display,
+            root,
+            &mut root_return,
+            &mut child_return,
+            &mut root_x,
+            &mut root_y,
+            &mut win_x,
+            &mut win_y,
+            &mut mask,
+        )
+    };
+
+    unsafe { xlib::XCloseDisplay(display) };
+
+    if result == FALSE {
+        Err(Error::SimulateFailed("XQueryPointer failed".into()))
+    } else {
+        Ok((root_x as f64, root_y as f64))
+    }
+}
+
 /// Open a display connection
 fn open_display() -> Result<*mut xlib::Display> {
     let display = unsafe { xlib::XOpenDisplay(null()) };

@@ -90,5 +90,6 @@ pub use statistics::{EventStatistics, StatisticsCollector};
 
 // Simulation functions
 pub use platform::{
-    key_press, key_release, key_tap, mouse_click, mouse_move, mouse_press, mouse_release, simulate,
+    key_press, key_release, key_tap, mouse_click, mouse_move, mouse_position, mouse_press,
+    mouse_release, simulate,
 };
