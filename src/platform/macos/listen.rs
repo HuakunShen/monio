@@ -45,6 +45,16 @@ unsafe impl Sync for TapPointer {}
 /// Stored event tap for timeout recovery
 static EVENT_TAP: Mutex<Option<TapPointer>> = Mutex::new(None);
 
+/// Wrapper for raw CFRunLoop pointer that implements Send + Sync.
+/// Safety: CFRunLoopStop() is documented as thread-safe by Apple.
+struct RunLoopRef(*const CFRunLoop);
+unsafe impl Send for RunLoopRef {}
+unsafe impl Sync for RunLoopRef {}
+
+/// Stored reference to the hook thread's CFRunLoop, so `stop_hook()` can
+/// stop the correct run loop instead of the main thread's.
+static HOOK_RUN_LOOP: Mutex<Option<RunLoopRef>> = Mutex::new(None);
+
 /// Flag indicating whether we're in grab mode
 static GRAB_MODE: AtomicBool = AtomicBool::new(false);
 
@@ -409,6 +419,14 @@ pub fn run_hook<H: EventHandler + 'static>(running: &Arc<AtomicBool>, handler: H
         let current_loop = CFRunLoop::current()
             .ok_or_else(|| Error::HookStartFailed("Failed to get current run loop".into()))?;
 
+        // Store run loop reference so stop_hook() can stop the correct run loop
+        {
+            let mut rl = HOOK_RUN_LOOP
+                .lock()
+                .map_err(|_| Error::ThreadError("mutex poisoned".into()))?;
+            *rl = Some(RunLoopRef(&*current_loop as *const CFRunLoop));
+        }
+
         current_loop.add_source(Some(&source), kCFRunLoopCommonModes);
 
         // Enable the tap
@@ -437,6 +455,12 @@ pub fn run_hook<H: EventHandler + 'static>(running: &Arc<AtomicBool>, handler: H
     }
 
     // Clean up
+    {
+        let mut rl = HOOK_RUN_LOOP
+            .lock()
+            .map_err(|_| Error::ThreadError("mutex poisoned".into()))?;
+        *rl = None;
+    }
     {
         let mut h = HANDLER
             .lock()
@@ -523,6 +547,14 @@ pub fn run_grab_hook<H: GrabHandler + 'static>(
         let current_loop = CFRunLoop::current()
             .ok_or_else(|| Error::HookStartFailed("Failed to get current run loop".into()))?;
 
+        // Store run loop reference so stop_hook() can stop the correct run loop
+        {
+            let mut rl = HOOK_RUN_LOOP
+                .lock()
+                .map_err(|_| Error::ThreadError("mutex poisoned".into()))?;
+            *rl = Some(RunLoopRef(&*current_loop as *const CFRunLoop));
+        }
+
         current_loop.add_source(Some(&source), kCFRunLoopCommonModes);
 
         // Enable the tap
@@ -553,6 +585,12 @@ pub fn run_grab_hook<H: GrabHandler + 'static>(
     // Clean up
     GRAB_MODE.store(false, Ordering::SeqCst);
     {
+        let mut rl = HOOK_RUN_LOOP
+            .lock()
+            .map_err(|_| Error::ThreadError("mutex poisoned".into()))?;
+        *rl = None;
+    }
+    {
         let mut h = GRAB_HANDLER
             .lock()
             .map_err(|_| Error::ThreadError("mutex poisoned".into()))?;
@@ -574,10 +612,23 @@ pub fn run_grab_hook<H: GrabHandler + 'static>(
     Ok(())
 }
 
-/// Stop the event hook.
+/// Stop the event hook by stopping the hook thread's run loop.
+///
+/// Previously this incorrectly called `CFRunLoop::main()` which returns the
+/// main thread's run loop — not the background hook thread's. In Electron,
+/// this would attempt to stop Chromium's main run loop.
 pub fn stop_hook() -> Result<()> {
-    if let Some(run_loop) = CFRunLoop::main() {
-        run_loop.stop();
+    if let Ok(guard) = HOOK_RUN_LOOP.lock() {
+        if let Some(ref rl) = *guard {
+            if !rl.0.is_null() {
+                // Safety: CFRunLoopStop is thread-safe per Apple docs.
+                // The pointer is valid because the hook thread's run loop is
+                // still alive (Hook::stop sets the flag, calls us, then joins).
+                unsafe {
+                    (&*rl.0).stop();
+                }
+            }
+        }
     }
     Ok(())
 }
