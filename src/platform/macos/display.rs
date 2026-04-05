@@ -1,5 +1,7 @@
 //! macOS display and system property queries.
 
+#![allow(unsafe_op_in_unsafe_fn)]
+
 use crate::display::{DisplayInfo, Rect, SystemSettings};
 use crate::error::{Error, Result};
 use objc2_core_foundation::{
