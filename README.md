@@ -1,8 +1,10 @@
 # monio-rs
 
-A pure Rust cross-platform input hook library with **proper drag detection**.
-
+[![Crates.io](https://img.shields.io/crates/v/monio.svg)](https://crates.io/crates/monio)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/HuakunShen/monio)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
+A pure Rust cross-platform input hook library with **proper drag detection**.
 
 ## Features
 
@@ -130,12 +132,12 @@ fn main() {
 
 **Platform Support for Grabbing:**
 
-| Platform | Grab Support | Notes |
-|----------|--------------|-------|
-| macOS | ✅ Full | Via CGEventTap |
-| Windows | ✅ Full | Via low-level hooks |
-| Linux/X11 | ⚠️ Limited | Falls back to listen mode (XRecord cannot grab) |
-| Linux/Wayland | ⚠️ Limited | See [Wayland Limitation](#wayland-limitation) below |
+| Platform      | Grab Support | Notes                                               |
+| ------------- | ------------ | --------------------------------------------------- |
+| macOS         | ✅ Full      | Via CGEventTap                                      |
+| Windows       | ✅ Full      | Via low-level hooks                                 |
+| Linux/X11     | ⚠️ Limited   | Falls back to listen mode (XRecord cannot grab)     |
+| Linux/Wayland | ⚠️ Limited   | See [Wayland Limitation](#wayland-limitation) below |
 
 ### Channel-Based Listening (Non-Blocking)
 
@@ -313,19 +315,19 @@ fn main() -> monio::Result<()> {
 
 ## Event Types
 
-| Event Type | Description |
-|------------|-------------|
-| `HookEnabled` | Hook started successfully |
-| `HookDisabled` | Hook stopped |
-| `KeyPressed` | Key pressed down |
-| `KeyReleased` | Key released |
-| `KeyTyped` | Character typed (after dead key processing) |
-| `MousePressed` | Mouse button pressed |
-| `MouseReleased` | Mouse button released |
-| `MouseClicked` | Button press + release without movement |
-| `MouseMoved` | Mouse moved (no buttons held) |
-| `MouseDragged` | Mouse moved while button held |
-| `MouseWheel` | Scroll wheel rotated |
+| Event Type      | Description                                 |
+| --------------- | ------------------------------------------- |
+| `HookEnabled`   | Hook started successfully                   |
+| `HookDisabled`  | Hook stopped                                |
+| `KeyPressed`    | Key pressed down                            |
+| `KeyReleased`   | Key released                                |
+| `KeyTyped`      | Character typed (after dead key processing) |
+| `MousePressed`  | Mouse button pressed                        |
+| `MouseReleased` | Mouse button released                       |
+| `MouseClicked`  | Button press + release without movement     |
+| `MouseMoved`    | Mouse moved (no buttons held)               |
+| `MouseDragged`  | Mouse moved while button held               |
+| `MouseWheel`    | Scroll wheel rotated                        |
 
 ## Platform Notes
 
@@ -351,6 +353,7 @@ cargo build --features evdev --no-default-features
 ```
 
 **evdev permissions**: Requires membership in the `input` group:
+
 ```bash
 sudo usermod -aG input $USER
 # Log out and back in for changes to take effect
@@ -367,6 +370,7 @@ On **Wayland**, the `grab()` function has a fundamental limitation due to how Wa
 Wayland compositors use **libinput**, which takes exclusive access to physical input devices. When we grab via evdev, we intercept events before libinput sees them. When we re-inject events via uinput (virtual device), libinput typically ignores them for security reasons.
 
 **Workarounds:**
+
 - Use **X11** instead of Wayland for full grab support
 - Use grab only for **consuming/blocking** events, not for selective pass-through
 - For global hotkeys on Wayland, consider using your compositor's native hotkey system
