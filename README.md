@@ -60,6 +60,19 @@ monio = { version = "0.1", features = ["tokio", "recorder", "statistics"] }
 monio = { version = "0.1", features = ["evdev"], default-features = false }
 ```
 
+### AI agent skill
+
+Install the monio skill so agents can provide usage guidance from this repo:
+
+```bash
+npx skills add https://github.com/HuakunShen/monio/skills --skill monio
+```
+
+## Using monio in practice
+
+- [kunkunsh/tauri-plugin-user-input](https://github.com/kunkunsh/tauri-plugin-user-input.git): A Tauri plugin for exposing global keyboard and mouse input hooks to desktop apps.
+- [HuakunShen/monio-napi](https://github.com/HuakunShen/monio-napi.git): Node.js N-API bindings that wrap monio for JavaScript/TypeScript usage. Mainly for Electron apps.
+
 ## Quick Start
 
 ### Listening for Events
@@ -391,4 +404,3 @@ cargo run --example recorder --features recorder -- playback macro.json
 # Input statistics (requires statistics feature)
 cargo run --example statistics --features statistics
 ```
-
