@@ -1,0 +1,133 @@
+{
+  "version": "2026-07-20",
+  "last_commit": "598c0701115250c4a9141aef0772187c8ed51dee",
+  "wiki_items": [
+    {
+      "id": "a3c76751-c1f8-4193-9c2e-a6a1febfd35b",
+      "title": "System Overview",
+      "path": "content/System Overview.md"
+    },
+    {
+      "id": "64f45de3-a107-4907-8776-0ee07ecbf83a",
+      "title": "Architecture",
+      "path": "content/Architecture/Architecture.md"
+    },
+    {
+      "id": "985e7283-3b99-4b48-abc3-0f6cfebc774d",
+      "title": "Hook and Events",
+      "path": "content/Services/Hook and Events.md"
+    },
+    {
+      "id": "b9c62397-8c83-44c5-95dc-89e288a9da10",
+      "title": "Channel-Based Events",
+      "path": "content/Services/Channel-Based Events.md"
+    },
+    {
+      "id": "741948f9-f0bc-40be-8453-8af0d4240c6d",
+      "title": "Event Recorder",
+      "path": "content/Services/Event Recorder.md"
+    },
+    {
+      "id": "a88a4559-4579-4929-9a99-8bea65c49bc8",
+      "title": "Statistics Collector",
+      "path": "content/Services/Statistics Collector.md"
+    },
+    {
+      "id": "9bab155f-177a-41ed-ba34-593659d53b79",
+      "title": "Display and System Settings",
+      "path": "content/Services/Display and System Settings.md"
+    },
+    {
+      "id": "1f65aa01-7d89-4dd8-9380-5b860ce683f2",
+      "title": "macOS",
+      "path": "content/Platforms/macOS.md"
+    },
+    {
+      "id": "1319b04c-683e-46a2-a0df-cc90e7393ed7",
+      "title": "Windows",
+      "path": "content/Platforms/Windows.md"
+    },
+    {
+      "id": "f0924418-0d50-4205-bfdd-ada2a8c46eb0",
+      "title": "Linux",
+      "path": "content/Platforms/Linux.md"
+    }
+  ],
+  "knowledge_relations": [
+    {
+      "type": "PARENT_CHILD",
+      "source": "a3c76751-c1f8-4193-9c2e-a6a1febfd35b",
+      "target": "64f45de3-a107-4907-8776-0ee07ecbf83a"
+    },
+    {
+      "type": "PARENT_CHILD",
+      "source": "64f45de3-a107-4907-8776-0ee07ecbf83a",
+      "target": "985e7283-3b99-4b48-abc3-0f6cfebc774d"
+    },
+    {
+      "type": "PARENT_CHILD",
+      "source": "64f45de3-a107-4907-8776-0ee07ecbf83a",
+      "target": "b9c62397-8c83-44c5-95dc-89e288a9da10"
+    },
+    {
+      "type": "PARENT_CHILD",
+      "source": "64f45de3-a107-4907-8776-0ee07ecbf83a",
+      "target": "741948f9-f0bc-40be-8453-8af0d4240c6d"
+    },
+    {
+      "type": "PARENT_CHILD",
+      "source": "64f45de3-a107-4907-8776-0ee07ecbf83a",
+      "target": "a88a4559-4579-4929-9a99-8bea65c49bc8"
+    },
+    {
+      "type": "PARENT_CHILD",
+      "source": "64f45de3-a107-4907-8776-0ee07ecbf83a",
+      "target": "9bab155f-177a-41ed-ba34-593659d53b79"
+    },
+    {
+      "type": "PARENT_CHILD",
+      "source": "64f45de3-a107-4907-8776-0ee07ecbf83a",
+      "target": "1f65aa01-7d89-4dd8-9380-5b860ce683f2"
+    },
+    {
+      "type": "PARENT_CHILD",
+      "source": "64f45de3-a107-4907-8776-0ee07ecbf83a",
+      "target": "1319b04c-683e-46a2-a0df-cc90e7393ed7"
+    },
+    {
+      "type": "PARENT_CHILD",
+      "source": "64f45de3-a107-4907-8776-0ee07ecbf83a",
+      "target": "f0924418-0d50-4205-bfdd-ada2a8c46eb0"
+    },
+    {
+      "type": "REFERENCE",
+      "source": "741948f9-f0bc-40be-8453-8af0d4240c6d",
+      "target": "985e7283-3b99-4b48-abc3-0f6cfebc774d"
+    },
+    {
+      "type": "REFERENCE",
+      "source": "a88a4559-4579-4929-9a99-8bea65c49bc8",
+      "target": "985e7283-3b99-4b48-abc3-0f6cfebc774d"
+    },
+    {
+      "type": "REFERENCE",
+      "source": "b9c62397-8c83-44c5-95dc-89e288a9da10",
+      "target": "985e7283-3b99-4b48-abc3-0f6cfebc774d"
+    },
+    {
+      "type": "REFERENCE",
+      "source": "1f65aa01-7d89-4dd8-9380-5b860ce683f2",
+      "target": "64f45de3-a107-4907-8776-0ee07ecbf83a"
+    },
+    {
+      "type": "REFERENCE",
+      "source": "1319b04c-683e-46a2-a0df-cc90e7393ed7",
+      "target": "64f45de3-a107-4907-8776-0ee07ecbf83a"
+    },
+    {
+      "type": "REFERENCE",
+      "source": "f0924418-0d50-4205-bfdd-ada2a8c46eb0",
+      "target": "64f45de3-a107-4907-8776-0ee07ecbf83a"
+    }
+  ]
+}
