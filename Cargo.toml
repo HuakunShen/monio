@@ -64,6 +64,10 @@ name = "simulate"
 path = "examples/simulate.rs"
 
 [[example]]
+name = "synthetic_input_detection"
+path = "examples/synthetic_input_detection.rs"
+
+[[example]]
 name = "tui_key_displayer"
 path = "examples/tui_key_displayer.rs"
 
