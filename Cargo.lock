@@ -895,6 +895,8 @@ dependencies = [
  "objc2-core-foundation",
  "objc2-core-graphics",
  "objc2-foundation",
+ "ohos-input-sys",
+ "ohos-sys-opaque-types",
  "ratatui",
  "reis",
  "serde",
@@ -1066,6 +1068,21 @@ dependencies = [
  "objc2",
  "objc2-foundation",
 ]
+
+[[package]]
+name = "ohos-input-sys"
+version = "0.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "599c198bf38eaeb566243c0d58b5a3525758cf7ff70751a57bcbd11152788cd8"
+dependencies = [
+ "ohos-sys-opaque-types",
+]
+
+[[package]]
+name = "ohos-sys-opaque-types"
+version = "0.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f0135000ddab1491bd02a60e855c02e71be855845ca354162c1e189dea79d015"
 
 [[package]]
 name = "once_cell"

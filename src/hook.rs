@@ -39,11 +39,16 @@ where
 /// - **Linux/X11**: Active grabs with XTest key/motion replay and native
 ///   pointer-gesture replay
 /// - **Linux/evdev**: Exclusive device grabs with uinput pass-through
+/// - **HarmonyOS PC/2in1 (API 26+, compile-checked)**: Keyboard grab; pointer observe-only
 ///
 /// On X11, passing a pointer press yields the complete pointer gesture to the
 /// local application. Monio reacquires the pointer after the application's
 /// implicit X11 grab ends, so the handler may not receive that gesture's
 /// intermediate motion or release events.
+///
+/// On HarmonyOS, `None` consumes keyboard events and `Some(_)` passes the
+/// original native keyboard event unchanged. Mouse and wheel events come from
+/// monitors, so their handler return values cannot suppress delivery.
 ///
 /// # Example
 ///
@@ -153,6 +158,7 @@ impl Hook {
     /// - **Linux/X11**: Active grabs with XTest key/motion replay and native
     ///   pointer-gesture replay
     /// - **Linux/evdev**: Exclusive device grabs with uinput pass-through
+    /// - **HarmonyOS PC/2in1 (API 26+, compile-checked)**: Keyboard grab; pointer observe-only
     pub fn grab<H: GrabHandler + 'static>(&self, handler: H) -> Result<()> {
         if self.running.swap(true, Ordering::SeqCst) {
             return Err(Error::AlreadyRunning);
@@ -267,6 +273,11 @@ where
 /// - **Linux/X11**: Active grabs with XTest key/motion replay and native
 ///   pointer-gesture replay
 /// - **Linux/evdev**: Exclusive device grabs with uinput pass-through
+/// - **HarmonyOS PC/2in1 (API 26+, compile-checked)**: Keyboard grab; pointer observe-only
+///
+/// HarmonyOS passes the original keyboard event for `Some(_)`; modifications
+/// to the returned `Event` are not applied. Pointer return values are ignored
+/// because Input Kit monitors cannot consume pointer events.
 ///
 /// # Example
 ///
