@@ -83,7 +83,7 @@ pub use display::{
 pub use error::{Error, Result};
 pub use event::{
     Button, Event, EventType, InjectorIdentity, InputOrigin, KeyboardData, MouseData,
-    ScrollDirection, WheelData,
+    RelativeMotion, ScrollDirection, WheelData,
 };
 pub use hook::{EventHandler, GrabHandler, Hook, grab, listen};
 pub use keycode::Key;

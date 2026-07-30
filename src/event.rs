@@ -107,6 +107,16 @@ pub struct KeyboardData {
     pub char: Option<char>,
 }
 
+/// Relative pointer motion associated with a mouse movement event.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "recorder", derive(Serialize, Deserialize))]
+pub struct RelativeMotion {
+    /// Horizontal movement delta.
+    pub delta_x: f64,
+    /// Vertical movement delta.
+    pub delta_y: f64,
+}
+
 /// Mouse event data.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "recorder", derive(Serialize, Deserialize))]
@@ -119,6 +129,9 @@ pub struct MouseData {
     pub y: f64,
     /// Click count (for click events).
     pub clicks: u8,
+    /// Relative motion supplied by backends that can observe device deltas.
+    #[cfg_attr(feature = "recorder", serde(default))]
+    pub relative: Option<RelativeMotion>,
 }
 
 /// Mouse wheel event data.
@@ -248,6 +261,7 @@ impl Event {
             x,
             y,
             clicks: 0,
+            relative: None,
         });
         event
     }
@@ -260,6 +274,7 @@ impl Event {
             x,
             y,
             clicks: 0,
+            relative: None,
         });
         event
     }
@@ -272,6 +287,7 @@ impl Event {
             x,
             y,
             clicks,
+            relative: None,
         });
         event
     }
@@ -284,7 +300,19 @@ impl Event {
             x,
             y,
             clicks: 0,
+            relative: None,
         });
+        event
+    }
+
+    /// Create a mouse moved event with absolute position and relative motion.
+    pub fn mouse_moved_relative(x: f64, y: f64, delta_x: f64, delta_y: f64) -> Self {
+        let mut event = Self::mouse_moved(x, y);
+        event
+            .mouse
+            .as_mut()
+            .expect("mouse movement event should contain mouse data")
+            .relative = Some(RelativeMotion { delta_x, delta_y });
         event
     }
 
@@ -296,7 +324,19 @@ impl Event {
             x,
             y,
             clicks: 0,
+            relative: None,
         });
+        event
+    }
+
+    /// Create a mouse dragged event with absolute position and relative motion.
+    pub fn mouse_dragged_relative(x: f64, y: f64, delta_x: f64, delta_y: f64) -> Self {
+        let mut event = Self::mouse_dragged(x, y);
+        event
+            .mouse
+            .as_mut()
+            .expect("mouse drag event should contain mouse data")
+            .relative = Some(RelativeMotion { delta_x, delta_y });
         event
     }
 
@@ -365,6 +405,42 @@ mod tests {
         assert!(event.is_from_this_monio_session());
     }
 
+    #[test]
+    fn absolute_mouse_motion_has_no_relative_delta() {
+        let event = Event::mouse_moved(100.0, 200.0);
+
+        assert_eq!(event.mouse.unwrap().relative, None);
+    }
+
+    #[test]
+    fn relative_mouse_motion_keeps_absolute_position_and_delta() {
+        let event = Event::mouse_moved_relative(100.0, 200.0, -3.5, 4.25);
+        let mouse = event.mouse.unwrap();
+
+        assert_eq!((mouse.x, mouse.y), (100.0, 200.0));
+        assert_eq!(
+            mouse.relative,
+            Some(RelativeMotion {
+                delta_x: -3.5,
+                delta_y: 4.25,
+            })
+        );
+    }
+
+    #[test]
+    fn relative_drag_uses_drag_event_type() {
+        let event = Event::mouse_dragged_relative(10.0, 20.0, 1.0, -2.0);
+
+        assert_eq!(event.event_type, EventType::MouseDragged);
+        assert_eq!(
+            event.mouse.unwrap().relative,
+            Some(RelativeMotion {
+                delta_x: 1.0,
+                delta_y: -2.0,
+            })
+        );
+    }
+
     #[cfg(feature = "recorder")]
     #[test]
     fn legacy_serialized_event_defaults_to_unknown_origin() {
@@ -379,5 +455,21 @@ mod tests {
             serde_json::from_value(value).expect("legacy event should deserialize");
 
         assert_eq!(decoded.origin, InputOrigin::Unknown);
+    }
+
+    #[cfg(feature = "recorder")]
+    #[test]
+    fn legacy_serialized_mouse_event_defaults_to_no_relative_motion() {
+        let event = Event::mouse_moved(10.0, 20.0);
+        let mut value = serde_json::to_value(event).expect("event should serialize");
+        value["mouse"]
+            .as_object_mut()
+            .expect("mouse should be an object")
+            .remove("relative");
+
+        let decoded: Event =
+            serde_json::from_value(value).expect("legacy event should deserialize");
+
+        assert_eq!(decoded.mouse.unwrap().relative, None);
     }
 }
