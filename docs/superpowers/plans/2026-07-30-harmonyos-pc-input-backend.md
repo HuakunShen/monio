@@ -196,7 +196,7 @@ pub(crate) fn translate_axis(
 ) -> Option<Event>;
 ```
 
-- [ ] **Step 1: Add failing key-map tests**
+- [x] **Step 1: Add failing key-map tests**
 
 Under `#[cfg(test)]` in `keycodes.rs`, add table-driven assertions for:
 
@@ -227,7 +227,7 @@ Assert both directions for every pair, assert `keycode_to_key(99_999)` is
 `Some(99_999)`, and assert unsupported `F13`, `IntlYen`, and `LaunchApp1`
 return `None`.
 
-- [ ] **Step 2: Add failing event-translation tests**
+- [x] **Step 2: Add failing event-translation tests**
 
 Test all exact rules:
 
@@ -255,7 +255,7 @@ Assert modifier/button masks are set before press-event construction and
 cleared before release/cancel-event construction. Assert every event origin is
 `InputOrigin::Unknown`.
 
-- [ ] **Step 3: Expose pure OHOS modules to host tests and verify red**
+- [x] **Step 3: Expose pure OHOS modules to host tests and verify red**
 
 At the bottom of `src/platform/mod.rs`, add:
 
@@ -284,7 +284,7 @@ cargo test platform::ohos_test
 
 Expected: FAIL because the mapping and translation functions are not defined.
 
-- [ ] **Step 4: Implement the mappings and translations**
+- [x] **Step 4: Implement the mappings and translations**
 
 Define named constants for the action, mouse-button, and axis integer values.
 Implement the complete API-23 mapping for:
@@ -311,7 +311,7 @@ Update `crate::state` before constructing press/release events, classify move
 using `state::is_button_held()`, use absolute wheel magnitudes, and ignore zero
 or unsupported axis values.
 
-- [ ] **Step 5: Run pure tests and cross-check**
+- [x] **Step 5: Run pure tests and cross-check**
 
 Run:
 
@@ -322,7 +322,7 @@ cargo check --target aarch64-unknown-linux-ohos
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit the translation core**
+- [x] **Step 6: Commit the translation core**
 
 ```bash
 git add src/platform/mod.rs src/platform/ohos

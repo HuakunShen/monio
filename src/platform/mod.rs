@@ -28,3 +28,7 @@ pub use linux::*;
     target_env = "ohos"
 )))]
 compile_error!("monio only supports macOS, Windows, Linux, and HarmonyOS");
+
+#[cfg(all(test, not(target_env = "ohos")))]
+#[path = "ohos/test_module.rs"]
+mod ohos_test;
