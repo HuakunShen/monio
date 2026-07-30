@@ -3,7 +3,9 @@
 mod constants;
 mod display;
 mod keycodes;
+mod lifecycle;
 mod listen;
+mod result;
 mod simulate;
 mod translate;
 

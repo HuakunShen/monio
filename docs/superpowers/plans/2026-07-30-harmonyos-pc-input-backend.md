@@ -392,7 +392,7 @@ pub(crate) fn unregister<A: RegistrationApi>(
 ) -> std::result::Result<(), u32>;
 ```
 
-- [ ] **Step 1: Add failing native-result tests**
+- [x] **Step 1: Add failing native-result tests**
 
 Assert this classification:
 
@@ -410,7 +410,7 @@ permission becomes `Error::PermissionDenied`, unsupported becomes
 `Error::NotSupported`, and other outcomes become `Error::HookStartFailed`.
 Assert injection permission errors mention `CONTROL_DEVICE`.
 
-- [ ] **Step 2: Add failing transaction tests**
+- [x] **Step 2: Add failing transaction tests**
 
 Implement a `FakeApi` that stores a `Vec<&'static str>` call log and can fail
 one named add/remove operation. Test:
@@ -426,7 +426,7 @@ Repeated cleanup: no additional calls and success
 Cleanup failure: continue removing remaining registrations, return first code
 ```
 
-- [ ] **Step 3: Verify the new tests fail**
+- [x] **Step 3: Verify the new tests fail**
 
 Run:
 
@@ -437,14 +437,14 @@ cargo test platform::ohos_test
 Expected: FAIL because `FailureKind`, error mapping, and registration lifecycle
 are not defined.
 
-- [ ] **Step 4: Implement result mapping and lifecycle**
+- [x] **Step 4: Implement result mapping and lifecycle**
 
 Use numeric codes from `ohos-input-sys` without importing that crate into pure
 modules. Roll registration back in reverse order on every add failure.
 `unregister` clears each flag before attempting its remove call, attempts every
 registered removal, and returns only the first removal error.
 
-- [ ] **Step 5: Verify pure tests and OHOS type checking**
+- [x] **Step 5: Verify pure tests and OHOS type checking**
 
 Run:
 
@@ -455,7 +455,7 @@ cargo check --target aarch64-unknown-linux-ohos
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit the lifecycle**
+- [x] **Step 6: Commit the lifecycle**
 
 ```bash
 git add src/platform/ohos
