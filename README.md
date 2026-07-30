@@ -370,6 +370,11 @@ cargo run --example synthetic_input_detection
 The command exits unsuccessfully unless the synthesized keyboard and mouse
 events are all observed as `Injected { injector: ThisMonioSession }`.
 
+For the verified macOS implementation, current Windows/Linux source audit,
+unresolved hypotheses, native experiment requirements, and copy-paste prompts
+for continuing on another machine, see
+[`docs/input-provenance-cross-platform-handoff.md`](docs/input-provenance-cross-platform-handoff.md).
+
 ## Platform Notes
 
 ### macOS

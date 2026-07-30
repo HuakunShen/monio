@@ -64,6 +64,15 @@ cargo build --features evdev --no-default-features
 
 CI installs `libx11-dev libxtst-dev libevdev-dev` on Ubuntu for these builds.
 
+### Input provenance work
+
+Before changing input-source classification, synthetic-input detection, or any
+Windows/Linux backend for remote-input use, read
+[`docs/input-provenance-cross-platform-handoff.md`](docs/input-provenance-cross-platform-handoff.md)
+completely. It separates verified behavior from hypotheses, defines the
+`Unknown` safety boundary, and lists the native acceptance tests required on
+each platform.
+
 ### Other feature flags
 
 - `tokio` — adds async channel variants (`channel::listen_async_channel`, `channel::grab_async_channel`) alongside the always-available sync `std::mpsc` ones.
@@ -89,7 +98,7 @@ This fixes a common issue in other libraries where drag events are reported as r
 ```
 src/
 ├── lib.rs          # Public API re-exports
-├── event.rs        # Event, EventType, Button, ScrollDirection, KeyboardData/MouseData/WheelData
+├── event.rs        # Event/InputOrigin plus keyboard, mouse, and wheel data
 ├── error.rs        # Error enum with thiserror
 ├── state.rs        # Global atomic button/modifier mask (THE KEY FIX)
 ├── keycode.rs      # Key enum for all keyboard keys
