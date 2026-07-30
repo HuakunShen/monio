@@ -433,9 +433,32 @@ hypotheses, and native experiment requirements, see
 
 ## Platform Notes
 
+### Cross-platform relative pointer API
+
+CrossFlow can consume one event shape without platform-specific branches:
+
+```rust
+if let Some(mouse) = &event.mouse
+    && let Some(relative) = mouse.relative
+{
+    route_pointer_delta(relative.delta_x, relative.delta_y);
+}
+```
+
+`MouseData::x/y` remain available as absolute compatibility coordinates.
+macOS `listen()` and `grab()`, Linux evdev, and Linux X11 `grab()` populate
+`MouseData::relative`. Linux X11 `listen()` and the current Windows low-level
+hook leave it as `None`. `mouse_move_relative()` is the matching
+platform-neutral injection API.
+
 ### macOS
 
-Requires **Accessibility permissions**. The app will prompt for permission on first run, or you can grant it manually in System Preferences → Security & Privacy → Privacy → Accessibility.
+Requires **Accessibility permissions**. Mouse motion retains the Core Graphics
+absolute location and publishes `MouseEventDeltaX/Y` through
+`MouseData::relative`. Relative injection retains its absolute target and sets
+the same delta fields. Cursor disassociation for an unbounded CrossFlow capture
+session is a separate lifecycle feature and is not activated by generic
+`grab()`.
 
 ### Windows
 
@@ -472,6 +495,9 @@ another computer.
 # Use evdev backend (for Wayland support)
 cargo build --features evdev --no-default-features
 ```
+
+evdev coalesces `REL_X/REL_Y` from one `SYN_REPORT` frame into one Monio
+movement event with both tracked absolute `x/y` and `MouseData::relative`.
 
 **evdev permissions**: Requires membership in the `input` group and access to
 `/dev/uinput`. The injector is created before capture so its exact identity is

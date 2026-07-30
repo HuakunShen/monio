@@ -1168,6 +1168,101 @@ evdev/uinput
 Do not silently select XRecord/XTest on Wayland through XWayland. It cannot see
 or control native Wayland clients as a complete global input backend.
 
+## TODO: CrossFlow cross-platform relative capture parity
+
+The operating systems expose different mechanisms for cursor-independent
+relative pointer motion. Do not treat native capability as evidence that the
+current Monio backend already publishes `MouseData::relative` or provides a
+fail-safe CrossFlow capture lifecycle.
+
+| Platform/backend | Native capability | Current Monio state | Remaining work |
+| --- | --- | --- | --- |
+| macOS Core Graphics | `CGEventField::MouseEventDeltaX/Y` reports movement since the previous mouse event. `CGAssociateMouseAndMouseCursorPosition(false)` can keep the cursor stationary while events continue to carry deltas. | `listen()` and `grab()` now retain absolute `x/y` and publish `MouseData::relative`; relative injection also sets the event delta fields while retaining its absolute target. Focused construction/conversion tests pass. | Run native physical and posted-event edge tests. Cursor disassociation remains an explicit CrossFlow capture lease, not default `grab()` behavior. |
+| Windows | Raw Input delivers `WM_INPUT`/`RAWMOUSE`; `MOUSE_MOVE_RELATIVE` exposes `lLastX/lLastY` independently of the low-level hook's absolute cursor point. `SendInput` can inject relative `MOUSEEVENTF_MOVE`, and `ClipCursor` can constrain the visible cursor during an owned capture session. | The `WH_MOUSE_LL` backend reports only absolute `MSLLHOOKSTRUCT.pt`. `mouse_move_relative()` exists but is implemented as current position plus an absolute move. | Design a Raw Input motion stream plus low-level-hook suppression/provenance path, including event ordering, deduplication, registration ownership, injection semantics, and fail-safe cursor release. |
+| Linux X11 | XI2 `XI_RawMotion` remains available at the screen edge while active X11 grabs provide suppression. | Implemented for `grab()` and natively verified at the screen edge; relative XTest injection is also implemented. | Retain the existing path and complete the remaining window-manager, multi-monitor, transition, and failure-lifecycle matrix. |
+| Linux evdev/uinput | Kernel `REL_X/REL_Y` events are already cursor-independent hardware deltas; `EVIOCGRAB` provides exclusive source ownership. | Relative injection, capture, exclusive grab, and GNOME Wayland pass-through have been natively verified. The listener now coalesces `REL_X/REL_Y` per device through `SYN_REPORT`, retains tracked absolute `x/y`, publishes `MouseData::relative`, and replays an allowed grab motion as one uinput frame. | Re-run the native injection, grab, provenance, and GNOME Wayland regression matrix with the public relative field asserted. |
+| Linux Wayland portal/libei | InputCapture barriers plus an EIS receiver provide compositor-owned activation and relative capture; RemoteDesktop plus an EIS sender provides target injection. | Native GNOME proofs pass, including relative motion and capture/target role gating, but the production backend is not implemented. | Implement the production adapter, capability reporting, release/suggested-cursor restoration, and GNOME/KDE acceptance matrix. |
+
+### Deskflow reference implementation
+
+Deskflow master commit
+[`0bc325a`](https://github.com/deskflow/deskflow/commit/0bc325addc2720de4fdad637b34b20d780f681a4)
+was inspected on 2026-07-30. Its production choices provide a useful
+CrossFlow reference, but they are not identical across platforms:
+
+- macOS uses a `CGEventTap`; while the pointer is routed to another machine,
+  [`OSXScreen::leave()`](https://github.com/deskflow/deskflow/blob/0bc325addc2720de4fdad637b34b20d780f681a4/src/lib/platform/OSXScreen.mm#L817-L835)
+  calls `CGAssociateMouseAndMouseCursorPosition(false)`, and
+  [`onMouseMove()`](https://github.com/deskflow/deskflow/blob/0bc325addc2720de4fdad637b34b20d780f681a4/src/lib/platform/OSXScreen.mm#L991-L1026)
+  reads `kCGMouseEventDeltaX/Y`. The event tap consumes off-screen input and
+  re-associates the cursor on return. It does not use `IOHIDManager`.
+- Windows uses
+  [`WH_MOUSE_LL`](https://github.com/deskflow/deskflow/blob/0bc325addc2720de4fdad637b34b20d780f681a4/src/lib/platform/MSWindowsHook.cpp#L474-L620),
+  derives deltas from consecutive absolute hook positions, recenters with
+  `SetCursorPos`, and filters the synthetic warp interval with
+  `DESKFLOW_MSG_PRE_WARP`/`POST_WARP`. It does not use Raw Input.
+- X11 registers `XI_RawMotion`, but the
+  [current handler](https://github.com/deskflow/deskflow/blob/0bc325addc2720de4fdad637b34b20d780f681a4/src/lib/platform/XWindowsScreen.cpp#L1166-L1190)
+  queries the current absolute pointer position instead of reading XI2 raw
+  valuators. It derives a delta and periodically recenters the pointer.
+  Monio's existing XI2 raw-valuator path and evdev `REL_X/Y` path are stronger
+  relative-motion sources.
+- Wayland uses Portal InputCapture plus libei and forwards
+  [`ei_event_pointer_get_dx/dy`](https://github.com/deskflow/deskflow/blob/0bc325addc2720de4fdad637b34b20d780f681a4/src/lib/platform/EiScreen.cpp#L829-L856)
+  directly, with libei also providing target-side relative injection.
+
+Deskflow therefore validates a split design: native delta capture is distinct
+from target-side injection, and cursor ownership is an explicit route/session
+transition rather than an incidental property of a generic hook callback.
+
+Cross-platform TODOs:
+
+- [x] Align macOS `listen()` and `grab()` motion events with
+  `MouseData::relative`, while retaining absolute `x/y` and existing drag
+  classification.
+- [x] Make macOS relative injection construct an event with both the absolute
+  target position and `MouseEventDeltaX/Y`.
+- [ ] Run a native posted-event round trip and verify the macOS event tap
+  retains the requested target and delta fields.
+- [ ] Run a physical macOS screen-edge diagnostic. Record whether nonzero
+  deltas continue while the visible cursor is clamped.
+- [ ] Design an explicit cursor-disassociated capture lease for the
+  CrossFlow-remote-active state, following the source-verified Deskflow
+  pattern. It must save and restore the cursor position and visibility, call
+  `CGAssociateMouseAndMouseCursorPosition(true)` on every release/error path,
+  and never activate implicitly from generic `grab()`.
+- [ ] Add Windows Raw Input relative capture behind an owned message-window
+  lifecycle. Account for the Win32 rule that only one window per raw-input
+  device class is registered per process, so a library must not silently
+  replace its host application's registration.
+- [ ] Correlate Windows Raw Input motion with `WH_MOUSE_LL` suppression and
+  Monio provenance without double-emitting movement or weakening
+  `ThisMonioSession`.
+- [ ] Decide and document whether Windows CrossFlow injection should use true
+  relative `SendInput(MOUSEEVENTF_MOVE)` and target-side pointer acceleration,
+  or preserve the current absolute-target calculation; verify the selected
+  semantics natively in both ordinary desktop and screen-edge cases.
+- [x] Expose the already-working Linux evdev relative capture through
+  `MouseData::relative`, coalescing `REL_X/REL_Y` from one `SYN_REPORT` frame
+  into one movement event without regressing the verified injection, grab,
+  provenance, or Wayland pass-through paths.
+- [ ] Re-run the native evdev diagnostic and assert the coalesced public
+  relative field as well as the previously verified cursor displacement,
+  suppression, provenance, and pass-through behavior.
+- [ ] Expose backend capabilities and guarantees explicitly: relative capture,
+  edge continuation, suppression, cursor restoration, and whether deltas are
+  raw, accelerated, or compositor-defined.
+- [ ] Put cursor confinement/disassociation and emergency restoration in the
+  dedicated CrossFlow capture-session lifecycle proposed below, not in the
+  generic callback API.
+
+Primary Windows references:
+
+- <https://learn.microsoft.com/windows/win32/inputdev/about-raw-input>
+- <https://learn.microsoft.com/windows/win32/api/winuser/ns-winuser-rawmouse>
+- <https://learn.microsoft.com/windows/win32/api/winuser/nf-winuser-registerrawinputdevices>
+- <https://learn.microsoft.com/windows/win32/api/winuser/ns-winuser-mouseinput>
+
 ## CrossFlow Linux capture model
 
 CrossFlow is not the same problem as a generic per-event filtering hook.

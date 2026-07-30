@@ -224,22 +224,41 @@ fn emit_key(key: EvdevKey, pressed: bool) -> Result<()> {
     Ok(())
 }
 
-/// Emit a relative movement event
-fn emit_relative(axis: RelativeAxisType, value: i32) -> Result<()> {
+fn relative_motion_events(delta_x: i32, delta_y: i32) -> Vec<InputEvent> {
+    let mut events = Vec::with_capacity(2);
+    if delta_x != 0 {
+        events.push(InputEvent::new(
+            EvdevEventType::RELATIVE,
+            RelativeAxisType::REL_X.0,
+            delta_x,
+        ));
+    }
+    if delta_y != 0 {
+        events.push(InputEvent::new(
+            EvdevEventType::RELATIVE,
+            RelativeAxisType::REL_Y.0,
+            delta_y,
+        ));
+    }
+    events
+}
+
+/// Emit both relative axes as one kernel input frame.
+pub(crate) fn emit_relative_motion(delta_x: i32, delta_y: i32) -> Result<()> {
+    let events = relative_motion_events(delta_x, delta_y);
+    if events.is_empty() {
+        return Ok(());
+    }
+
     let mut guard = get_virtual_device()?;
     let state = guard
         .as_mut()
         .ok_or_else(|| Error::SimulateFailed("Virtual device not initialized".into()))?;
 
-    let events = [
-        InputEvent::new(EvdevEventType::RELATIVE, axis.0, value),
-        InputEvent::new(EvdevEventType::SYNCHRONIZATION, 0, 0),
-    ];
-
     state
         .device
         .emit(&events)
-        .map_err(|e| Error::SimulateFailed(format!("Failed to emit relative event: {}", e)))?;
+        .map_err(|e| Error::SimulateFailed(format!("Failed to emit relative motion: {}", e)))?;
 
     Ok(())
 }
@@ -344,17 +363,36 @@ pub fn mouse_move(x: f64, y: f64) -> Result<()> {
 
 /// Move the mouse by a relative offset.
 pub fn mouse_move_relative(delta_x: f64, delta_y: f64) -> Result<()> {
-    // For simplicity, we emit relative motion events
-    // A full implementation would track current position and emit deltas
-    emit_relative(RelativeAxisType::REL_X, delta_x as i32)?;
-    emit_relative(RelativeAxisType::REL_Y, delta_y as i32)?;
-    Ok(())
+    emit_relative_motion(delta_x as i32, delta_y as i32)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use evdev::InputEventKind;
     use std::path::PathBuf;
+
+    #[test]
+    fn relative_motion_is_built_as_one_uinput_frame() {
+        let events = relative_motion_events(12, -7);
+
+        assert_eq!(events.len(), 2);
+        assert_eq!(
+            events[0].kind(),
+            InputEventKind::RelAxis(RelativeAxisType::REL_X)
+        );
+        assert_eq!(events[0].value(), 12);
+        assert_eq!(
+            events[1].kind(),
+            InputEventKind::RelAxis(RelativeAxisType::REL_Y)
+        );
+        assert_eq!(events[1].value(), -7);
+        assert!(
+            events
+                .iter()
+                .all(|event| event.event_type() != EvdevEventType::SYNCHRONIZATION)
+        );
+    }
 
     #[test]
     fn retries_injector_identity_while_udev_permissions_settle() {
