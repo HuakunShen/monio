@@ -87,6 +87,11 @@ path = "examples/x11_grab_detection.rs"
 required-features = ["x11"]
 
 [[example]]
+name = "x11_relative_grab_detection"
+path = "examples/x11_relative_grab_detection.rs"
+required-features = ["x11"]
+
+[[example]]
 name = "channel_sync"
 path = "examples/channel_sync.rs"
 
