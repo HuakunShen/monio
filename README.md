@@ -136,7 +136,7 @@ fn main() {
 | ------------- | ------------ | --------------------------------------------------- |
 | macOS         | ✅ Full      | Via CGEventTap                                      |
 | Windows       | ✅ Full      | Via low-level hooks                                 |
-| Linux/X11     | ⚠️ Limited   | Falls back to listen mode (XRecord cannot grab)     |
+| Linux/X11     | ✅ Active    | XGrabKeyboard/XGrabPointer with XTest pass-through  |
 | Linux/Wayland | ⚠️ Limited   | See [Wayland Limitation](#wayland-limitation) below |
 
 ### Channel-Based Listening (Non-Blocking)
@@ -403,7 +403,18 @@ No special permissions required for hooking. Simulation may require the app to b
 
 Two backends are available:
 
-**X11 (default)**: Uses XRecord for event capture and XTest for simulation. Works only on X11.
+**X11 (default)**: Uses XRecord for listen-only capture, active
+`XGrabKeyboard`/`XGrabPointer` sessions for `grab()`, and XTest for simulation
+and grab pass-through. It works only on X11 and requires no `input` group or
+`/dev/uinput` access.
+
+When an X11 grab handler passes a pointer press, Monio yields that complete
+pointer gesture to the receiving application and reacquires the pointer after
+the application's implicit X11 grab ends. The handler may therefore not receive
+intermediate motion or release events for a gesture it chose to pass. Returning
+`None` consistently suppresses keyboard, button, wheel, and pointer-motion
+events, which is the recommended mode while a CrossFlow source is controlling
+another computer.
 
 **evdev**: Reads directly from `/dev/input/event*` devices. Works on both X11 and Wayland!
 
@@ -439,7 +450,7 @@ virtual device, and compositor policy for those events varies.
 
 **Workarounds:**
 
-- Use **X11** instead of Wayland for full grab support
+- Use **X11** for unprivileged active-grab support
 - Use grab only for **consuming/blocking** events, not for selective pass-through
 - For global hotkeys on Wayland, consider using your compositor's native hotkey system
 

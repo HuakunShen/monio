@@ -39,6 +39,7 @@ cargo run --example drag_detection     # MouseDragged vs MouseMoved demo
 cargo run --example grab               # block specific keys
 cargo run --example simulate           # synthesize input
 cargo run --example synthetic_input_detection # verify macOS/Windows self-injection provenance
+cargo run --features x11 --example x11_grab_detection # native X11 grab diagnostic
 cargo run --example mouse_position     # query cursor position
 cargo run --example display            # monitor/DPI/system-settings query
 cargo run --example channel_sync       # non-blocking std mpsc channel
@@ -54,7 +55,8 @@ cargo run --example tui_key_displayer  # ratatui TUI, keys/mouse live view
 Two independent, mutually-exclusive backends; `x11` is the default.
 
 ```bash
-# X11 (default) — XRecord for listen, XTest for simulate. Does not work on Wayland.
+# X11 (default) — XRecord listen, active X11 grab, XTest simulate/pass-through.
+# Does not work on Wayland and needs no input-group/uinput permission.
 cargo build --features x11
 
 # evdev — reads /dev/input directly, works under both X11 and Wayland sessions.
@@ -133,7 +135,16 @@ This shared contract is what lets `Hook`, `channel::*`, `EventRecorder`, and `St
 
 **Windows**: Uses the `windows` crate with low-level hooks (`WH_KEYBOARD_LL`, `WH_MOUSE_LL`). Full grab support. No special permissions for hooking; simulation may need Administrator in some contexts.
 
-**Linux**: X11 uses XRecord for listening and XTest for simulation (default, X11-only). `grab()` on X11 falls back to listen mode — XRecord cannot grab at the protocol level. evdev reads `/dev/input` directly and works under both X11 and Wayland, but **Wayland grab pass-through is unreliable**: consuming events (`None`) works, but re-injected pass-through events (`Some(event)`) are typically ignored by libinput, which takes exclusive device access on Wayland. Prefer X11 when full grab (block + pass-through) is required.
+**Linux**: X11 uses XRecord for listening, active
+`XGrabKeyboard`/`XGrabPointer` sessions for `grab()`, and XTest for simulation
+and pass-through (default, X11-only). A passed pointer press yields the complete
+local pointer gesture until the receiving application's implicit grab ends;
+the handler may not receive that gesture's intermediate motion/release events.
+evdev reads `/dev/input` directly and works under both X11 and Wayland, but
+**Wayland grab pass-through is unreliable**: consuming events (`None`) works,
+but re-injected pass-through events (`Some(event)`) are typically ignored by
+libinput, which takes exclusive device access on Wayland. Prefer X11 when
+unprivileged active grabbing is required.
 
 ### Key Files When Debugging Drag Detection
 

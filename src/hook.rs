@@ -36,7 +36,13 @@ where
 ///
 /// - **macOS**: Full support via CGEventTap
 /// - **Windows**: Full support via low-level hooks
-/// - **Linux/X11**: Not supported (XRecord is listen-only). Falls back to listen mode.
+/// - **Linux/X11**: Active keyboard/pointer grabs with XTest pass-through
+/// - **Linux/evdev**: Exclusive device grabs with uinput pass-through
+///
+/// On X11, passing a pointer press yields the complete pointer gesture to the
+/// local application. Monio reacquires the pointer after the application's
+/// implicit X11 grab ends, so the handler may not receive that gesture's
+/// intermediate motion or release events.
 ///
 /// # Example
 ///
@@ -143,7 +149,8 @@ impl Hook {
     ///
     /// - **macOS**: Full support
     /// - **Windows**: Full support
-    /// - **Linux/X11**: Falls back to listen mode (XRecord cannot grab)
+    /// - **Linux/X11**: Active grabs with XTest pass-through
+    /// - **Linux/evdev**: Exclusive device grabs with uinput pass-through
     pub fn grab<H: GrabHandler + 'static>(&self, handler: H) -> Result<()> {
         if self.running.swap(true, Ordering::SeqCst) {
             return Err(Error::AlreadyRunning);
@@ -255,7 +262,8 @@ where
 ///
 /// - **macOS**: Full support via CGEventTap
 /// - **Windows**: Full support via low-level hooks
-/// - **Linux/X11**: Falls back to listen mode (XRecord cannot grab)
+/// - **Linux/X11**: Active keyboard/pointer grabs with XTest pass-through
+/// - **Linux/evdev**: Exclusive device grabs with uinput pass-through
 ///
 /// # Example
 ///

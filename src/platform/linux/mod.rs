@@ -1,13 +1,16 @@
 //! Linux platform implementation.
 //!
 //! Supports two backends:
-//! - **X11**: Uses XRecord for listening (default)
+//! - **X11**: Uses XRecord for listening and active X11 grabs for suppression
 //! - **evdev**: Reads directly from /dev/input (works on X11 and Wayland)
 //!
 //! ## Feature Flags
 //!
 //! - `x11` (default): Use X11/XRecord for input capture
 //! - `evdev`: Use evdev for input capture (works on Wayland)
+//!
+//! The X11 backend needs access to the current X display but does not require
+//! membership in the `input` group or access to `/dev/uinput`.
 //!
 //! ## Permissions for evdev
 //!

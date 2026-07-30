@@ -15,7 +15,7 @@
 //! Platform support:
 //! - macOS: Full support (CGEventTap)
 //! - Windows: Full support (low-level hooks)
-//! - Linux/X11: Falls back to listen mode (XRecord cannot grab)
+//! - Linux/X11: Active keyboard/pointer grabs; no input-group permission needed
 //! - Linux/Wayland: Requires evdev feature + input group permissions
 
 use monio::{Event, EventType, Key, grab};
@@ -36,7 +36,7 @@ fn get_display_server() -> &'static str {
 }
 
 fn check_linux_permissions() {
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", feature = "evdev", not(feature = "x11")))]
     {
         use std::process::Command;
 
@@ -58,7 +58,7 @@ fn check_linux_permissions() {
             .ok()
             .and_then(|o| String::from_utf8(o.stdout).ok());
 
-        let has_input_group = output.as_ref().map_or(false, |g| g.contains("input"));
+        let has_input_group = output.as_ref().is_some_and(|g| g.contains("input"));
 
         // Check current process groups (active now)
         let current_groups = Command::new("groups")
@@ -66,9 +66,7 @@ fn check_linux_permissions() {
             .ok()
             .and_then(|o| String::from_utf8(o.stdout).ok());
 
-        let currently_has_input = current_groups
-            .as_ref()
-            .map_or(false, |g| g.contains("input"));
+        let currently_has_input = current_groups.as_ref().is_some_and(|g| g.contains("input"));
 
         if has_input_group && !currently_has_input {
             eprintln!("⚠️  You are in the 'input' group, but the change hasn't taken effect yet.");

@@ -175,8 +175,14 @@ pub fn key_press(key: Key) -> Result<()> {
     let keycode = key_to_keycode(key)
         .ok_or_else(|| Error::SimulateFailed(format!("Unsupported key: {:?}", key)))?;
 
+    replay_keycode(keycode, true)
+}
+
+/// Replay a raw X11 keycode while an active grab is temporarily released.
+pub(super) fn replay_keycode(keycode: u32, pressed: bool) -> Result<()> {
     with_injector(|display| {
-        let result = unsafe { xtest::XTestFakeKeyEvent(display, keycode, TRUE, 0) };
+        let is_press = if pressed { TRUE } else { FALSE };
+        let result = unsafe { xtest::XTestFakeKeyEvent(display, keycode, is_press, 0) };
         unsafe { xlib::XSync(display, FALSE) };
 
         if result == 0 {
@@ -192,16 +198,7 @@ pub fn key_release(key: Key) -> Result<()> {
     let keycode = key_to_keycode(key)
         .ok_or_else(|| Error::SimulateFailed(format!("Unsupported key: {:?}", key)))?;
 
-    with_injector(|display| {
-        let result = unsafe { xtest::XTestFakeKeyEvent(display, keycode, FALSE, 0) };
-        unsafe { xlib::XSync(display, FALSE) };
-
-        if result == 0 {
-            Err(Error::SimulateFailed("XTestFakeKeyEvent failed".into()))
-        } else {
-            Ok(())
-        }
-    })
+    replay_keycode(keycode, false)
 }
 
 /// Press and release a key.
@@ -223,11 +220,11 @@ fn button_to_code(button: Button) -> u32 {
     }
 }
 
-/// Press a mouse button.
-pub fn mouse_press(button: Button) -> Result<()> {
-    let code = button_to_code(button);
+/// Replay a raw X11 button code while an active grab is temporarily released.
+pub(super) fn replay_button(button: u32, pressed: bool) -> Result<()> {
     with_injector(|display| {
-        let result = unsafe { xtest::XTestFakeButtonEvent(display, code, TRUE, 0) };
+        let is_press = if pressed { TRUE } else { FALSE };
+        let result = unsafe { xtest::XTestFakeButtonEvent(display, button, is_press, 0) };
         unsafe { xlib::XSync(display, FALSE) };
 
         if result == 0 {
@@ -238,19 +235,16 @@ pub fn mouse_press(button: Button) -> Result<()> {
     })
 }
 
+/// Press a mouse button.
+pub fn mouse_press(button: Button) -> Result<()> {
+    let code = button_to_code(button);
+    replay_button(code, true)
+}
+
 /// Release a mouse button.
 pub fn mouse_release(button: Button) -> Result<()> {
     let code = button_to_code(button);
-    with_injector(|display| {
-        let result = unsafe { xtest::XTestFakeButtonEvent(display, code, FALSE, 0) };
-        unsafe { xlib::XSync(display, FALSE) };
-
-        if result == 0 {
-            Err(Error::SimulateFailed("XTestFakeButtonEvent failed".into()))
-        } else {
-            Ok(())
-        }
-    })
+    replay_button(code, false)
 }
 
 /// Click a mouse button (press and release).
@@ -273,8 +267,13 @@ pub fn mouse_move(x: f64, y: f64) -> Result<()> {
         0
     };
 
+    replay_motion(x_int, y_int)
+}
+
+/// Replay absolute pointer motion while an active grab is temporarily released.
+pub(super) fn replay_motion(x: c_int, y: c_int) -> Result<()> {
     with_injector(|display| {
-        let result = unsafe { xtest::XTestFakeMotionEvent(display, 0, x_int, y_int, 0) };
+        let result = unsafe { xtest::XTestFakeMotionEvent(display, 0, x, y, 0) };
         unsafe { xlib::XSync(display, FALSE) };
 
         if result == 0 {
