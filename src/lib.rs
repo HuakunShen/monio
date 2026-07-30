@@ -10,6 +10,7 @@
 //! - Clean, Rust-idiomatic API with traits and enums
 //! - Thread-safe design with atomic state tracking
 //! - Event simulation support
+//! - Input provenance for Monio's own macOS simulation events
 //!
 //! ## Quick Start
 //!
@@ -80,7 +81,10 @@ pub use display::{
     DisplayInfo, Rect, SystemSettings, display_at_point, displays, primary_display, system_settings,
 };
 pub use error::{Error, Result};
-pub use event::{Button, Event, EventType, KeyboardData, MouseData, ScrollDirection, WheelData};
+pub use event::{
+    Button, Event, EventType, InjectorIdentity, InputOrigin, KeyboardData, MouseData,
+    ScrollDirection, WheelData,
+};
 pub use hook::{EventHandler, GrabHandler, Hook, grab, listen};
 pub use keycode::Key;
 #[cfg(feature = "recorder")]

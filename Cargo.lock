@@ -691,11 +691,12 @@ dependencies = [
 
 [[package]]
 name = "monio"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "crossterm 0.28.1",
  "ctrlc",
  "evdev",
+ "getrandom",
  "libc",
  "log",
  "objc2",

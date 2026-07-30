@@ -12,10 +12,16 @@ use objc2_core_graphics::{
 };
 use std::sync::Mutex;
 
-use super::keycodes::key_to_keycode;
+use super::{keycodes::key_to_keycode, provenance};
 
 /// Track the current modifier flags for simulation
 static SIM_FLAGS: Mutex<CGEventFlags> = Mutex::new(CGEventFlags(0));
+
+fn post_event(event: &CGEvent) -> Result<()> {
+    provenance::tag_event(event)?;
+    CGEvent::post(CGEventTapLocation::HIDEventTap, Some(event));
+    Ok(())
+}
 
 /// Get current mouse position as (x, y) coordinates.
 pub fn mouse_position() -> Result<(f64, f64)> {
@@ -131,7 +137,7 @@ pub fn key_press(key: Key) -> Result<()> {
                 _ => {}
             }
             CGEvent::set_flags(Some(&event), *flags);
-            CGEvent::post(CGEventTapLocation::HIDEventTap, Some(&event));
+            post_event(&event)?;
         } else {
             // For regular keys, use keyboard event
             let event = CGEvent::new_keyboard_event(Some(&source), keycode, true)
@@ -140,7 +146,7 @@ pub fn key_press(key: Key) -> Result<()> {
                 .lock()
                 .map_err(|_| Error::SimulateFailed("mutex poisoned".into()))?;
             CGEvent::set_flags(Some(&event), *flags);
-            CGEvent::post(CGEventTapLocation::HIDEventTap, Some(&event));
+            post_event(&event)?;
         }
     }
     Ok(())
@@ -186,7 +192,7 @@ pub fn key_release(key: Key) -> Result<()> {
                 _ => {}
             }
             CGEvent::set_flags(Some(&event), *flags);
-            CGEvent::post(CGEventTapLocation::HIDEventTap, Some(&event));
+            post_event(&event)?;
         } else {
             // For regular keys, use keyboard event
             let event = CGEvent::new_keyboard_event(Some(&source), keycode, false)
@@ -195,7 +201,7 @@ pub fn key_release(key: Key) -> Result<()> {
                 .lock()
                 .map_err(|_| Error::SimulateFailed("mutex poisoned".into()))?;
             CGEvent::set_flags(Some(&event), *flags);
-            CGEvent::post(CGEventTapLocation::HIDEventTap, Some(&event));
+            post_event(&event)?;
         }
     }
     Ok(())
@@ -244,7 +250,7 @@ pub fn mouse_press(button: Button) -> Result<()> {
             );
         }
 
-        CGEvent::post(CGEventTapLocation::HIDEventTap, Some(&event));
+        post_event(&event)?;
     }
     Ok(())
 }
@@ -275,7 +281,7 @@ pub fn mouse_release(button: Button) -> Result<()> {
             );
         }
 
-        CGEvent::post(CGEventTapLocation::HIDEventTap, Some(&event));
+        post_event(&event)?;
     }
     Ok(())
 }
@@ -302,7 +308,7 @@ pub fn mouse_move(x: f64, y: f64) -> Result<()> {
         )
         .ok_or_else(|| Error::SimulateFailed("Failed to create mouse event".into()))?;
 
-        CGEvent::post(CGEventTapLocation::HIDEventTap, Some(&event));
+        post_event(&event)?;
     }
     Ok(())
 }
@@ -322,7 +328,7 @@ pub fn mouse_scroll(delta_y: i32, delta_x: i32) -> Result<()> {
         )
         .ok_or_else(|| Error::SimulateFailed("Failed to create scroll event".into()))?;
 
-        CGEvent::post(CGEventTapLocation::HIDEventTap, Some(&event));
+        post_event(&event)?;
     }
     Ok(())
 }

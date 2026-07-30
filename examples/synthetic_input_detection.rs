@@ -1,4 +1,4 @@
-//! Diagnostic example for observing monio's own simulated input.
+//! Diagnostic example for verifying provenance on Monio's own simulated input.
 //!
 //! Run with: cargo run --example synthetic_input_detection
 
@@ -42,6 +42,10 @@ fn observe_event(
     origin: (f64, f64),
     target: (f64, f64),
 ) {
+    if !event.is_from_this_monio_session() {
+        return;
+    }
+
     if event.event_type == EventType::KeyPressed
         && event
             .keyboard
@@ -207,26 +211,35 @@ fn print_result(label: &str, observed: bool) {
 fn print_summary(observed: Observation) {
     println!("\nResults");
     println!("=======");
-    print_result("ControlLeft press observed:", observed.control_pressed);
-    print_result("ControlLeft release observed:", observed.control_released);
-    print_result("Mouse target observed:", observed.reached_target);
-    print_result("Mouse restoration observed:", observed.returned_to_origin);
+    print_result("Tagged ControlLeft press:", observed.control_pressed);
+    print_result("Tagged ControlLeft release:", observed.control_released);
+    print_result("Tagged mouse target:", observed.reached_target);
+    print_result("Tagged mouse restoration:", observed.returned_to_origin);
 
     println!();
     if observed.is_complete() {
-        println!("The listener received events matching every simulated action.");
+        println!("Every simulated action was classified as injected by this Monio session.");
     } else {
-        println!("The listener did not receive every simulated action on this run.");
+        println!("The listener did not classify every simulated action as this Monio session.");
     }
     println!(
-        "This only proves observation by timing and matching values. monio's public Event API \
-         has no physical-versus-synthetic source field, so it cannot distinguish the two."
+        "Untagged events remain InputOrigin::Unknown; Unknown is not proof of physical input."
     );
 }
 
+fn validate_observation(observed: Observation) -> io::Result<()> {
+    if observed.is_complete() {
+        Ok(())
+    } else {
+        Err(io::Error::other(
+            "synthetic input provenance verification failed",
+        ))
+    }
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
-    println!("monio synthetic input detection example");
-    println!("=======================================\n");
+    println!("monio synthetic input provenance example");
+    println!("========================================\n");
     println!("This will briefly press ControlLeft and move the mouse, then restore it.");
     println!("On macOS, grant Accessibility permission to the terminal first.\n");
 
@@ -237,6 +250,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let observed = diagnostic_result?;
     stop_result?;
     print_summary(observed);
+    validate_observation(observed)?;
 
     Ok(())
 }
@@ -244,10 +258,17 @@ fn main() -> Result<(), Box<dyn Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use monio::{Event, Key, Rect};
+    use monio::{Event, InjectorIdentity, InputOrigin, Key, Rect};
 
     const ORIGIN: (f64, f64) = (100.0, 200.0);
     const TARGET: (f64, f64) = (132.0, 224.0);
+
+    fn from_this_session(mut event: Event) -> Event {
+        event.origin = InputOrigin::Injected {
+            injector: InjectorIdentity::ThisMonioSession,
+        };
+        event
+    }
 
     #[test]
     fn observes_simulated_control_press() {
@@ -255,7 +276,7 @@ mod tests {
 
         observe_event(
             &mut observed,
-            &Event::key_pressed(Key::ControlLeft, 0),
+            &from_this_session(Event::key_pressed(Key::ControlLeft, 0)),
             ORIGIN,
             TARGET,
         );
@@ -269,7 +290,7 @@ mod tests {
 
         observe_event(
             &mut observed,
-            &Event::key_released(Key::ControlLeft, 0),
+            &from_this_session(Event::key_released(Key::ControlLeft, 0)),
             ORIGIN,
             TARGET,
         );
@@ -283,7 +304,7 @@ mod tests {
 
         observe_event(
             &mut observed,
-            &Event::mouse_moved(ORIGIN.0, ORIGIN.1),
+            &from_this_session(Event::mouse_moved(ORIGIN.0, ORIGIN.1)),
             ORIGIN,
             TARGET,
         );
@@ -291,13 +312,13 @@ mod tests {
 
         observe_event(
             &mut observed,
-            &Event::mouse_moved(TARGET.0 + 0.5, TARGET.1 - 0.5),
+            &from_this_session(Event::mouse_moved(TARGET.0 + 0.5, TARGET.1 - 0.5)),
             ORIGIN,
             TARGET,
         );
         observe_event(
             &mut observed,
-            &Event::mouse_moved(ORIGIN.0 - 0.5, ORIGIN.1 + 0.5),
+            &from_this_session(Event::mouse_moved(ORIGIN.0 - 0.5, ORIGIN.1 + 0.5)),
             ORIGIN,
             TARGET,
         );
@@ -337,5 +358,30 @@ mod tests {
         );
 
         assert_eq!(observed, Observation::default());
+    }
+
+    #[test]
+    fn ignores_matching_input_without_this_session_origin() {
+        let mut observed = Observation::default();
+
+        observe_event(
+            &mut observed,
+            &Event::key_pressed(Key::ControlLeft, 0),
+            ORIGIN,
+            TARGET,
+        );
+        observe_event(
+            &mut observed,
+            &Event::mouse_moved(TARGET.0, TARGET.1),
+            ORIGIN,
+            TARGET,
+        );
+
+        assert_eq!(observed, Observation::default());
+    }
+
+    #[test]
+    fn incomplete_provenance_result_is_an_error() {
+        assert!(validate_observation(Observation::default()).is_err());
     }
 }

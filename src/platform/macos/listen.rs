@@ -22,7 +22,7 @@ use std::ptr::null_mut;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use super::keycodes::keycode_to_key;
+use super::{keycodes::keycode_to_key, provenance};
 
 /// Stored handler for the callback (listen mode)
 static HANDLER: Mutex<Option<Box<dyn EventHandler>>> = Mutex::new(None);
@@ -185,7 +185,7 @@ unsafe extern "C-unwind" fn event_callback(
 
 /// Convert a CGEvent to our Event type
 unsafe fn convert_event(event_type: CGEventType, cg_event: NonNull<CGEvent>) -> Option<Event> {
-    match event_type {
+    let event = match event_type {
         CGEventType::KeyDown => {
             let code = CGEvent::integer_value_field(
                 Some(cg_event.as_ref()),
@@ -361,11 +361,18 @@ unsafe fn convert_event(event_type: CGEventType, cg_event: NonNull<CGEvent>) -> 
         }
 
         _ => None,
-    }
+    };
+
+    event.map(|mut event| {
+        event.origin = provenance::event_origin(cg_event.as_ref());
+        event
+    })
 }
 
 /// Run the event hook (blocking).
 pub fn run_hook<H: EventHandler + 'static>(running: &Arc<AtomicBool>, handler: H) -> Result<()> {
+    provenance::initialize()?;
+
     // Store handler and stop flag
     {
         let mut h = HANDLER
@@ -490,6 +497,8 @@ pub fn run_grab_hook<H: GrabHandler + 'static>(
     running: &Arc<AtomicBool>,
     handler: H,
 ) -> Result<()> {
+    provenance::initialize()?;
+
     // Store handler and stop flag
     {
         let mut h = GRAB_HANDLER
@@ -630,4 +639,32 @@ pub fn stop_hook() -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{InjectorIdentity, InputOrigin};
+    use objc2_core_graphics::{CGEventSource, CGEventSourceStateID};
+
+    #[test]
+    fn convert_event_preserves_this_monio_session_origin() {
+        let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+            .expect("CGEventSource should be available");
+        let event = CGEvent::new_keyboard_event(Some(&source), 0, true)
+            .expect("keyboard CGEvent should be available");
+        super::super::provenance::tag_event(&event).expect("event should be tagged");
+
+        let converted = unsafe {
+            convert_event(CGEventType::KeyDown, NonNull::from(&*event))
+                .expect("event should convert")
+        };
+
+        assert_eq!(
+            converted.origin,
+            InputOrigin::Injected {
+                injector: InjectorIdentity::ThisMonioSession,
+            }
+        );
+    }
 }

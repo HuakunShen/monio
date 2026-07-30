@@ -37,29 +37,29 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-monio = "0.1"
+monio = "0.2"
 ```
 
 ### Feature Flags
 
 ```toml
 # Default (X11 on Linux)
-monio = "0.1"
+monio = "0.2"
 
 # Async channel support with Tokio
-monio = { version = "0.1", features = ["tokio"] }
+monio = { version = "0.2", features = ["tokio"] }
 
 # Event recording and playback (macro scripts)
-monio = { version = "0.1", features = ["recorder"] }
+monio = { version = "0.2", features = ["recorder"] }
 
 # Input statistics collection
-monio = { version = "0.1", features = ["statistics"] }
+monio = { version = "0.2", features = ["statistics"] }
 
 # All features
-monio = { version = "0.1", features = ["tokio", "recorder", "statistics"] }
+monio = { version = "0.2", features = ["tokio", "recorder", "statistics"] }
 
 # Linux: evdev support (works on X11 AND Wayland)
-monio = { version = "0.1", features = ["evdev"], default-features = false }
+monio = { version = "0.2", features = ["evdev"], default-features = false }
 ```
 
 ### AI agent skill
@@ -329,6 +329,47 @@ fn main() -> monio::Result<()> {
 | `MouseDragged`  | Mouse moved while button held               |
 | `MouseWheel`    | Scroll wheel rotated                        |
 
+### Input provenance
+
+Every `Event` includes an `origin: InputOrigin`. Treat
+`InputOrigin::Unknown` as an honest lack of evidence, not as proof that the
+event came from physical hardware.
+
+On macOS, every event injected through Monio's simulation API carries a random,
+process-session tag in `CGEventField::EventSourceUserData`. The event-tap
+listener recognizes it only when both that exact tag and
+`CGEventField::EventSourceUnixProcessID` match the current process:
+
+```rust
+use monio::Event;
+
+fn handle(event: &Event) {
+    if event.is_from_this_monio_session() {
+        // Monio injected this event in the current process session.
+        // Do not re-transmit it as local input.
+        return;
+    }
+
+    // The event is untagged or its origin is otherwise unknown.
+}
+```
+
+This is a non-authenticating feedback-loop marker for Monio's own injected
+input, not a security or authorization boundary. It does not prove that an
+untagged event is physical: another program may synthesize an untagged event,
+and privileged or Accessibility-authorized software may be able to imitate
+source metadata. Windows and Linux currently report `InputOrigin::Unknown`
+until their native backends preserve equivalent evidence.
+
+Run the native macOS diagnostic after granting Accessibility permission:
+
+```bash
+cargo run --example synthetic_input_detection
+```
+
+The command exits unsuccessfully unless the synthesized keyboard and mouse
+events are all observed as `Injected { injector: ThisMonioSession }`.
+
 ## Platform Notes
 
 ### macOS
@@ -388,6 +429,9 @@ cargo run --example drag_detection
 
 # Event simulation
 cargo run --example simulate
+
+# macOS self-injection provenance
+cargo run --example synthetic_input_detection
 
 # Event grabbing (block specific keys)
 cargo run --example grab

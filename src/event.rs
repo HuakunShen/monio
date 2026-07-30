@@ -135,6 +135,33 @@ pub struct WheelData {
     pub delta: f64,
 }
 
+/// Provenance information retained by the active platform input backend.
+///
+/// `Unknown` is deliberately not equivalent to physical input. A backend uses
+/// this value whenever it cannot make a stronger, evidence-backed claim.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "recorder", derive(Serialize, Deserialize))]
+#[non_exhaustive]
+pub enum InputOrigin {
+    /// The backend cannot determine where this event originated.
+    #[default]
+    Unknown,
+    /// The active backend has evidence that this event was synthesized.
+    Injected {
+        /// Best available identity for the injector.
+        injector: InjectorIdentity,
+    },
+}
+
+/// Identity retained for an injected input event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "recorder", derive(Serialize, Deserialize))]
+#[non_exhaustive]
+pub enum InjectorIdentity {
+    /// The event carries this Monio process session's ephemeral tag and source PID.
+    ThisMonioSession,
+}
+
 /// A complete input event.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "recorder", derive(Serialize, Deserialize))]
@@ -145,6 +172,9 @@ pub struct Event {
     pub time: SystemTime,
     /// Current modifier/button mask when event occurred.
     pub mask: u32,
+    /// Best available evidence about where this event originated.
+    #[cfg_attr(feature = "recorder", serde(default))]
+    pub origin: InputOrigin,
     /// Keyboard-specific data.
     pub keyboard: Option<KeyboardData>,
     /// Mouse-specific data.
@@ -160,6 +190,7 @@ impl Event {
             event_type,
             time: SystemTime::now(),
             mask: crate::state::get_mask(),
+            origin: InputOrigin::Unknown,
             keyboard: None,
             mouse: None,
             wheel: None,
@@ -300,5 +331,53 @@ impl Event {
                 | EventType::MouseDragged
                 | EventType::MouseWheel
         )
+    }
+
+    /// Whether this event was injected by the current Monio process session.
+    pub fn is_from_this_monio_session(&self) -> bool {
+        matches!(
+            self.origin,
+            InputOrigin::Injected {
+                injector: InjectorIdentity::ThisMonioSession
+            }
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_events_have_unknown_input_origin() {
+        let event = Event::key_pressed(Key::KeyA, 0);
+
+        assert_eq!(event.origin, InputOrigin::Unknown);
+    }
+
+    #[test]
+    fn event_reports_injection_from_this_monio_session() {
+        let mut event = Event::mouse_moved(100.0, 200.0);
+        event.origin = InputOrigin::Injected {
+            injector: InjectorIdentity::ThisMonioSession,
+        };
+
+        assert!(event.is_from_this_monio_session());
+    }
+
+    #[cfg(feature = "recorder")]
+    #[test]
+    fn legacy_serialized_event_defaults_to_unknown_origin() {
+        let event = Event::key_pressed(Key::KeyA, 0);
+        let mut value = serde_json::to_value(event).expect("event should serialize");
+        value
+            .as_object_mut()
+            .expect("event should serialize as an object")
+            .remove("origin");
+
+        let decoded: Event =
+            serde_json::from_value(value).expect("legacy event should deserialize");
+
+        assert_eq!(decoded.origin, InputOrigin::Unknown);
     }
 }
