@@ -1,10 +1,11 @@
 //! X11 input listening using XRecord.
 
 use crate::error::{Error, Result};
-use crate::event::{Button, Event, InputOrigin, ScrollDirection};
+use crate::event::{Button, Event, InputOrigin, RelativeMotion, ScrollDirection};
 use crate::hook::{EventHandler, GrabHandler};
 use crate::platform::linux::x11::provenance::RequestCorrelation;
 use crate::platform::linux::x11::simulate;
+use crate::platform::linux::x11::xinput::RawMotionInput;
 use crate::state::{
     self, MASK_ALT, MASK_BUTTON1, MASK_BUTTON2, MASK_BUTTON3, MASK_CTRL, MASK_META, MASK_SHIFT,
 };
@@ -132,6 +133,14 @@ fn convert_event(type_: c_int, code: u8, x: f64, y: f64) -> Option<Event> {
         }
 
         _ => None,
+    }
+}
+
+fn relative_motion_event(x: f64, y: f64, relative: RelativeMotion, dragging: bool) -> Event {
+    if dragging {
+        Event::mouse_dragged_relative(x, y, relative.delta_x, relative.delta_y)
+    } else {
+        Event::mouse_moved_relative(x, y, relative.delta_x, relative.delta_y)
     }
 }
 
@@ -397,7 +406,9 @@ const GRAB_POLL_INTERVAL: Duration = Duration::from_millis(2);
 
 struct ActiveGrabs {
     display: *mut xlib::Display,
+    root: xlib::Window,
     window: xlib::Window,
+    raw_motion: RawMotionInput,
     keyboard_grabbed: bool,
     pointer_grabbed: bool,
 }
@@ -412,6 +423,13 @@ impl ActiveGrabs {
 
             let screen = xlib::XDefaultScreen(display);
             let root = xlib::XRootWindow(display, screen);
+            let raw_motion = match RawMotionInput::initialize(display, root) {
+                Ok(raw_motion) => raw_motion,
+                Err(error) => {
+                    xlib::XCloseDisplay(display);
+                    return Err(error);
+                }
+            };
             let mut attributes: xlib::XSetWindowAttributes = std::mem::zeroed();
             attributes.override_redirect = xlib::True;
             attributes.event_mask = (xlib::KeyPressMask
@@ -435,6 +453,8 @@ impl ActiveGrabs {
                 &mut attributes,
             );
             if window == 0 {
+                let mut raw_motion = raw_motion;
+                let _ = raw_motion.deselect(display);
                 xlib::XCloseDisplay(display);
                 return Err(Error::HookStartFailed(
                     "Failed to create X11 grab window".into(),
@@ -446,7 +466,9 @@ impl ActiveGrabs {
 
             let mut grabs = Self {
                 display,
+                root,
                 window,
+                raw_motion,
                 keyboard_grabbed: false,
                 pointer_grabbed: false,
             };
@@ -520,6 +542,7 @@ impl ActiveGrabs {
     }
 
     fn begin_pointer_passthrough(&mut self, button: u32) -> Result<()> {
+        self.suspend_raw_motion()?;
         unsafe {
             xlib::XUngrabPointer(self.display, xlib::CurrentTime);
             xlib::XSync(self.display, FALSE);
@@ -528,6 +551,7 @@ impl ActiveGrabs {
 
         if let Err(error) = simulate::replay_button(button, true) {
             self.grab_pointer()?;
+            self.resume_raw_motion()?;
             return Err(error);
         }
         Ok(())
@@ -575,6 +599,7 @@ impl ActiveGrabs {
             xlib::GrabSuccess => {
                 self.pointer_grabbed = true;
                 self.sync_pointer_button_state();
+                self.resume_raw_motion()?;
                 Ok(true)
             }
             xlib::AlreadyGrabbed | xlib::GrabFrozen => Ok(false),
@@ -583,8 +608,6 @@ impl ActiveGrabs {
     }
 
     fn sync_pointer_button_state(&self) {
-        let screen = unsafe { xlib::XDefaultScreen(self.display) };
-        let root = unsafe { xlib::XRootWindow(self.display, screen) };
         let mut root_return = 0;
         let mut child_return = 0;
         let mut root_x = 0;
@@ -595,7 +618,7 @@ impl ActiveGrabs {
         unsafe {
             xlib::XQueryPointer(
                 self.display,
-                root,
+                self.root,
                 &mut root_return,
                 &mut child_return,
                 &mut root_x,
@@ -612,6 +635,7 @@ impl ActiveGrabs {
     }
 
     fn replay_motion(&mut self, x: c_int, y: c_int) -> Result<()> {
+        self.suspend_raw_motion()?;
         unsafe {
             xlib::XUngrabPointer(self.display, xlib::CurrentTime);
             xlib::XSync(self.display, FALSE);
@@ -620,7 +644,54 @@ impl ActiveGrabs {
 
         let replay_result = simulate::replay_motion(x, y);
         self.grab_pointer()?;
+        self.resume_raw_motion()?;
         replay_result
+    }
+
+    fn suspend_raw_motion(&mut self) -> Result<()> {
+        self.raw_motion.deselect(self.display)
+    }
+
+    fn resume_raw_motion(&mut self) -> Result<()> {
+        self.raw_motion.select(self.display)
+    }
+
+    fn pointer_position(&self) -> Result<(f64, f64)> {
+        let mut root_return = 0;
+        let mut child_return = 0;
+        let mut root_x = 0;
+        let mut root_y = 0;
+        let mut window_x = 0;
+        let mut window_y = 0;
+        let mut mask = 0;
+        let result = unsafe {
+            xlib::XQueryPointer(
+                self.display,
+                self.root,
+                &mut root_return,
+                &mut child_return,
+                &mut root_x,
+                &mut root_y,
+                &mut window_x,
+                &mut window_y,
+                &mut mask,
+            )
+        };
+
+        if result == 0 {
+            Err(Error::Platform(
+                "XQueryPointer failed while handling XI_RawMotion".into(),
+            ))
+        } else {
+            Ok((root_x as f64, root_y as f64))
+        }
+    }
+
+    fn decode_raw_motion(&self, event: &mut xlib::XEvent) -> Result<Option<RelativeMotion>> {
+        if !self.raw_motion.is_selected() {
+            return Ok(None);
+        }
+        self.raw_motion.decode(self.display, event)
     }
 }
 
@@ -634,6 +705,7 @@ fn sync_button_mask(x11_mask: c_uint, x11_button: c_uint, monio_button: u32) {
 
 impl Drop for ActiveGrabs {
     fn drop(&mut self) {
+        let _ = self.raw_motion.deselect(self.display);
         unsafe {
             if self.pointer_grabbed {
                 xlib::XUngrabPointer(self.display, xlib::CurrentTime);
@@ -648,6 +720,19 @@ impl Drop for ActiveGrabs {
             xlib::XCloseDisplay(self.display);
         }
     }
+}
+
+fn handle_relative_motion<H: GrabHandler>(
+    grabs: &mut ActiveGrabs,
+    handler: &H,
+    relative: RelativeMotion,
+) -> Result<()> {
+    let (x, y) = grabs.pointer_position()?;
+    let event = relative_motion_event(x, y, relative, state::is_button_held());
+    if handler.handle_event(&event).is_some() {
+        grabs.replay_motion(x as c_int, y as c_int)?;
+    }
+    Ok(())
 }
 
 fn grab_failed(device: &str, status: c_int) -> Error {
@@ -717,13 +802,8 @@ fn handle_grab_event<H: GrabHandler>(
                 }
             }
             xlib::MotionNotify => {
-                let motion = event.motion;
-                if let Some(event) =
-                    convert_event(type_, 0, motion.x_root as f64, motion.y_root as f64)
-                    && handler.handle_event(&event).is_some()
-                {
-                    grabs.replay_motion(motion.x_root, motion.y_root)?;
-                }
+                // XI_RawMotion is the single callback source while the active
+                // pointer grab owns the device. Core motion would duplicate it.
             }
             _ => {}
         }
@@ -766,6 +846,10 @@ pub fn run_grab_hook<H: GrabHandler + 'static>(
 
                 let mut event: xlib::XEvent = unsafe { std::mem::zeroed() };
                 unsafe { xlib::XNextEvent(grabs.display, &mut event) };
+                if let Some(relative) = grabs.decode_raw_motion(&mut event)? {
+                    handle_relative_motion(&mut grabs, &handler, relative)?;
+                    continue;
+                }
                 if !grabs.pointer_grabbed
                     && matches!(
                         event.get_type(),
@@ -796,4 +880,41 @@ pub fn run_grab_hook<H: GrabHandler + 'static>(
     *stop_flag = None;
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::relative_motion_event;
+    use crate::event::{EventType, RelativeMotion};
+
+    #[test]
+    fn raw_motion_is_moved_without_held_button() {
+        let event = relative_motion_event(
+            100.0,
+            200.0,
+            RelativeMotion {
+                delta_x: 4.0,
+                delta_y: -2.0,
+            },
+            false,
+        );
+
+        assert_eq!(event.event_type, EventType::MouseMoved);
+        assert_eq!(event.mouse.unwrap().relative.unwrap().delta_x, 4.0);
+    }
+
+    #[test]
+    fn raw_motion_is_dragged_with_held_button() {
+        let event = relative_motion_event(
+            100.0,
+            200.0,
+            RelativeMotion {
+                delta_x: 4.0,
+                delta_y: -2.0,
+            },
+            true,
+        );
+
+        assert_eq!(event.event_type, EventType::MouseDragged);
+    }
 }
