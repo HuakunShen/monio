@@ -3,8 +3,11 @@ use super::constants::{
     KEY_ACTION_DOWN, KEY_ACTION_UP, MOUSE_ACTION_BUTTON_DOWN, MOUSE_ACTION_BUTTON_UP,
     MOUSE_ACTION_CANCEL, MOUSE_ACTION_MOVE, MOUSE_BUTTON_NONE,
 };
-use super::keycodes::{button_from_native, keycode_to_key};
-use crate::event::{Event, ScrollDirection};
+use super::keycodes::{
+    button_from_native, button_to_native, key_to_keycode, keycode_to_key,
+};
+use crate::error::{Error, Result};
+use crate::event::{Button, Event, EventType, ScrollDirection};
 use crate::keycode::Key;
 use crate::state::{
     self, MASK_ALT, MASK_CTRL, MASK_META, MASK_SHIFT, button_to_mask,
@@ -84,9 +87,110 @@ pub(crate) fn translate_axis(
     Some(Event::mouse_wheel(x, y, direction, value.abs()))
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum SimulationSpec {
+    Key {
+        action: i32,
+        keycode: i32,
+    },
+    Mouse {
+        action: i32,
+        button: i32,
+        x: i32,
+        y: i32,
+    },
+}
+
+pub(crate) fn simulation_spec(event: &Event) -> Result<SimulationSpec> {
+    match event.event_type {
+        EventType::KeyPressed | EventType::KeyReleased => {
+            let keyboard = event.keyboard.as_ref().ok_or_else(|| {
+                Error::NotSupported("HarmonyOS key event is missing keyboard data".into())
+            })?;
+            let keycode = key_to_keycode(keyboard.key).ok_or_else(|| {
+                Error::NotSupported(format!(
+                    "HarmonyOS cannot simulate key {:?}",
+                    keyboard.key
+                ))
+            })?;
+            let action = if event.event_type == EventType::KeyPressed {
+                KEY_ACTION_DOWN
+            } else {
+                KEY_ACTION_UP
+            };
+
+            Ok(SimulationSpec::Key { action, keycode })
+        }
+        EventType::MousePressed | EventType::MouseReleased => {
+            let mouse = event.mouse.as_ref().ok_or_else(|| {
+                Error::NotSupported("HarmonyOS mouse event is missing mouse data".into())
+            })?;
+            let button = mouse.button.ok_or_else(|| {
+                Error::NotSupported("HarmonyOS mouse button event has no button".into())
+            })?;
+            if matches!(button, Button::Unknown(_)) {
+                return Err(Error::NotSupported(format!(
+                    "HarmonyOS cannot simulate mouse button {button:?}"
+                )));
+            }
+            let button = button_to_native(button).ok_or_else(|| {
+                Error::NotSupported(format!(
+                    "HarmonyOS cannot simulate mouse button {button:?}"
+                ))
+            })?;
+            let (x, y) = checked_coordinates(mouse.x, mouse.y)?;
+            let action = if event.event_type == EventType::MousePressed {
+                MOUSE_ACTION_BUTTON_DOWN
+            } else {
+                MOUSE_ACTION_BUTTON_UP
+            };
+
+            Ok(SimulationSpec::Mouse {
+                action,
+                button,
+                x,
+                y,
+            })
+        }
+        EventType::MouseMoved => {
+            let mouse = event.mouse.as_ref().ok_or_else(|| {
+                Error::NotSupported("HarmonyOS mouse move is missing mouse data".into())
+            })?;
+            let (x, y) = checked_coordinates(mouse.x, mouse.y)?;
+            Ok(SimulationSpec::Mouse {
+                action: MOUSE_ACTION_MOVE,
+                button: MOUSE_BUTTON_NONE,
+                x,
+                y,
+            })
+        }
+        _ => Err(Error::NotSupported(format!(
+            "HarmonyOS cannot simulate {:?} events",
+            event.event_type
+        ))),
+    }
+}
+
+fn checked_coordinates(x: f64, y: f64) -> Result<(i32, i32)> {
+    if !x.is_finite()
+        || !y.is_finite()
+        || x < i32::MIN as f64
+        || x > i32::MAX as f64
+        || y < i32::MIN as f64
+        || y > i32::MAX as f64
+    {
+        return Err(Error::SimulateFailed(format!(
+            "HarmonyOS global coordinates are outside the i32 range: ({x}, {y})"
+        )));
+    }
+
+    Ok((x as i32, y as i32))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::Error;
     use crate::event::{Button, EventType, InputOrigin, ScrollDirection};
     use crate::keycode::Key;
     use crate::state::{
@@ -170,5 +274,82 @@ mod tests {
         assert!(translate_axis(3, 10.0, 20.0, 3.0).is_none());
         assert!(translate_axis(1, 10.0, 20.0, 0.0).is_none());
         state::reset_mask();
+    }
+
+    #[test]
+    fn simulation_specs_validate_supported_events() {
+        assert_eq!(
+            simulation_spec(&Event::key_pressed(Key::KeyA, 2017)).unwrap(),
+            SimulationSpec::Key {
+                action: 1,
+                keycode: 2017
+            }
+        );
+        assert_eq!(
+            simulation_spec(&Event::key_released(Key::KeyA, 2017)).unwrap(),
+            SimulationSpec::Key {
+                action: 2,
+                keycode: 2017
+            }
+        );
+        assert_eq!(
+            simulation_spec(&Event::mouse_pressed(Button::Left, 10.75, -20.25)).unwrap(),
+            SimulationSpec::Mouse {
+                action: 2,
+                button: 0,
+                x: 10,
+                y: -20,
+            }
+        );
+        assert_eq!(
+            simulation_spec(&Event::mouse_released(Button::Button4, 30.0, 40.0)).unwrap(),
+            SimulationSpec::Mouse {
+                action: 3,
+                button: 4,
+                x: 30,
+                y: 40,
+            }
+        );
+        assert_eq!(
+            simulation_spec(&Event::mouse_moved(50.0, 60.0)).unwrap(),
+            SimulationSpec::Mouse {
+                action: 1,
+                button: -1,
+                x: 50,
+                y: 60,
+            }
+        );
+    }
+
+    #[test]
+    fn simulation_specs_reject_unsupported_or_invalid_events() {
+        let unsupported = [
+            Event::key_pressed(Key::F13, 0),
+            Event::mouse_pressed(Button::Unknown(42), 1.0, 2.0),
+            Event::mouse_clicked(Button::Left, 1.0, 2.0, 1),
+            Event::mouse_dragged(1.0, 2.0),
+            Event::key_typed(Key::KeyA, 2017, 'a'),
+            Event::hook_enabled(),
+            Event::mouse_wheel(1.0, 2.0, ScrollDirection::Up, 1.0),
+        ];
+
+        for event in unsupported {
+            assert!(matches!(
+                simulation_spec(&event),
+                Err(Error::NotSupported(_))
+            ));
+        }
+
+        for event in [
+            Event::mouse_moved(f64::NAN, 1.0),
+            Event::mouse_moved(1.0, f64::INFINITY),
+            Event::mouse_moved(i32::MAX as f64 + 1.0, 1.0),
+            Event::mouse_moved(1.0, i32::MIN as f64 - 1.0),
+        ] {
+            assert!(matches!(
+                simulation_spec(&event),
+                Err(Error::SimulateFailed(_))
+            ));
+        }
     }
 }

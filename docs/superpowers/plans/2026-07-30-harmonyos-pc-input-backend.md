@@ -473,7 +473,7 @@ git commit -m "feat(ohos): add transactional registration"
 - Consumes: `key_to_keycode`, `button_to_native`, Input Kit native constructors/setters/destructors/injection, and result mapping
 - Produces: all simulation convenience functions and `mouse_position`
 
-- [ ] **Step 1: Add failing simulation-plan tests**
+- [x] **Step 1: Add failing simulation-plan tests**
 
 Add a pure specification type and function to `translate.rs`:
 
@@ -497,7 +497,7 @@ wheel/click/dragged/typed/hook lifecycle events are rejected, unsupported
 keys/buttons are rejected, non-finite coordinates are rejected, and values
 outside the `i32` range are rejected.
 
-- [ ] **Step 2: Run the focused tests to verify red**
+- [x] **Step 2: Run the focused tests to verify red**
 
 Run:
 
@@ -507,13 +507,13 @@ cargo test platform::ohos_test::translate::tests::simulation
 
 Expected: FAIL because `SimulationSpec` and `simulation_spec` do not exist.
 
-- [ ] **Step 3: Implement pure simulation validation**
+- [x] **Step 3: Implement pure simulation validation**
 
 Return `Error::NotSupported` for unsupported event kinds/keys/buttons. Convert
 finite in-range mouse coordinates with Rust's truncation toward zero. Return
 `Error::SimulateFailed` for non-finite or out-of-range coordinates.
 
-- [ ] **Step 4: Implement scoped native injection**
+- [x] **Step 4: Implement scoped native injection**
 
 In `simulate.rs`, add private `NativeKeyEvent` and `NativeMouseEvent` owners.
 Their constructors reject null native pointers, and `Drop` calls the matching
@@ -543,7 +543,7 @@ mouse_click: mouse_press, then mouse_release
 mouse_move: one MouseMoved event at absolute global coordinates
 ```
 
-- [ ] **Step 5: Implement pointer position and explicit unsupported queries**
+- [x] **Step 5: Implement pointer position and explicit unsupported queries**
 
 Call:
 
@@ -556,7 +556,7 @@ Return `(x, y)` on success and map errors with operation
 `display_at_point`, and `system_settings` as explicit `Error::NotSupported`
 with “HarmonyOS Input Kit does not expose this query” messages.
 
-- [ ] **Step 6: Verify tests and cross-target compilation**
+- [x] **Step 6: Verify tests and cross-target compilation**
 
 Run:
 
@@ -568,7 +568,7 @@ cargo check --target aarch64-unknown-linux-ohos --all-features
 
 Expected: PASS without linking `libohinput.so`.
 
-- [ ] **Step 7: Commit simulation and pointer position**
+- [x] **Step 7: Commit simulation and pointer position**
 
 ```bash
 git add src/platform/ohos
