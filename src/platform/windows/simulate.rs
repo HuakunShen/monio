@@ -33,7 +33,17 @@ pub fn mouse_position() -> Result<(f64, f64)> {
 
 fn build_mouse_input(flags: MOUSE_EVENT_FLAGS, data: u32, dx: i32, dy: i32) -> Result<INPUT> {
     let session_tag = provenance::session_tag()?;
-    Ok(INPUT {
+    Ok(build_mouse_input_with_tag(flags, data, dx, dy, session_tag))
+}
+
+fn build_mouse_input_with_tag(
+    flags: MOUSE_EVENT_FLAGS,
+    data: u32,
+    dx: i32,
+    dy: i32,
+    tag: usize,
+) -> INPUT {
+    INPUT {
         r#type: INPUT_MOUSE,
         Anonymous: INPUT_0 {
             mi: MOUSEINPUT {
@@ -42,25 +52,46 @@ fn build_mouse_input(flags: MOUSE_EVENT_FLAGS, data: u32, dx: i32, dy: i32) -> R
                 mouseData: data,
                 dwFlags: flags,
                 time: 0,
-                dwExtraInfo: session_tag,
+                dwExtraInfo: tag,
             },
         },
-    })
+    }
+}
+
+fn normalize_relative_axis(value: f64) -> i32 {
+    if !value.is_finite() {
+        0
+    } else {
+        value.round().clamp(i32::MIN as f64, i32::MAX as f64) as i32
+    }
+}
+
+fn build_relative_mouse_input(delta_x: f64, delta_y: f64, tag: usize) -> Result<INPUT> {
+    Ok(build_mouse_input_with_tag(
+        MOUSEEVENTF_MOVE,
+        0,
+        normalize_relative_axis(delta_x),
+        normalize_relative_axis(delta_y),
+        tag,
+    ))
+}
+
+fn send_input(input: INPUT, context: &str) -> Result<()> {
+    let result = unsafe { SendInput(&[input], size_of::<INPUT>() as i32) };
+
+    if result != 1 {
+        Err(Error::SimulateFailed(format!(
+            "SendInput failed for {context}"
+        )))
+    } else {
+        Ok(())
+    }
 }
 
 /// Send a mouse event
 fn sim_mouse_event(flags: MOUSE_EVENT_FLAGS, data: u32, dx: i32, dy: i32) -> Result<()> {
     let input = build_mouse_input(flags, data, dx, dy)?;
-    let inputs = [input];
-    let result = unsafe { SendInput(&inputs, size_of::<INPUT>() as i32) };
-
-    if result != 1 {
-        Err(Error::SimulateFailed(
-            "SendInput failed for mouse event".into(),
-        ))
-    } else {
-        Ok(())
-    }
+    send_input(input, "mouse event")
 }
 
 fn build_keyboard_input(vk: u16, flags: u32) -> Result<INPUT> {
@@ -197,6 +228,17 @@ pub fn mouse_click(button: Button) -> Result<()> {
 
 /// Move the mouse to a position.
 pub fn mouse_move(x: f64, y: f64) -> Result<()> {
+    let (normalized_x, normalized_y) = normalized_absolute_position(x, y)?;
+
+    sim_mouse_event(
+        MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK,
+        0,
+        normalized_x,
+        normalized_y,
+    )
+}
+
+fn normalized_absolute_position(x: f64, y: f64) -> Result<(i32, i32)> {
     let width = unsafe { GetSystemMetrics(SM_CXVIRTUALSCREEN) };
     let height = unsafe { GetSystemMetrics(SM_CYVIRTUALSCREEN) };
 
@@ -207,18 +249,34 @@ pub fn mouse_move(x: f64, y: f64) -> Result<()> {
     let normalized_x = ((x as i32 + 1) * 65535) / width;
     let normalized_y = ((y as i32 + 1) * 65535) / height;
 
-    sim_mouse_event(
-        MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK,
-        0,
-        normalized_x,
-        normalized_y,
-    )
+    Ok((normalized_x, normalized_y))
 }
 
 /// Move the mouse by a relative offset.
 pub fn mouse_move_relative(delta_x: f64, delta_y: f64) -> Result<()> {
-    let (x, y) = mouse_position()?;
-    mouse_move(x + delta_x, y + delta_y)
+    let input = build_relative_mouse_input(delta_x, delta_y, provenance::session_tag()?)?;
+    let mouse = unsafe { input.Anonymous.mi };
+    if mouse.dx == 0 && mouse.dy == 0 {
+        return Ok(());
+    }
+    send_input(input, "relative mouse movement")
+}
+
+pub(super) fn replay_mouse_move_relative(delta_x: f64, delta_y: f64) -> Result<()> {
+    let input = build_relative_mouse_input(delta_x, delta_y, provenance::grab_replay_tag()?)?;
+    send_input(input, "grab relative mouse replay")
+}
+
+pub(super) fn replay_mouse_move_absolute(x: f64, y: f64) -> Result<()> {
+    let (dx, dy) = normalized_absolute_position(x, y)?;
+    let input = build_mouse_input_with_tag(
+        MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK,
+        0,
+        dx,
+        dy,
+        provenance::grab_replay_tag()?,
+    );
+    send_input(input, "grab absolute mouse replay")
 }
 
 /// Scroll the mouse wheel.
@@ -267,5 +325,37 @@ mod tests {
             mouse.dwExtraInfo,
             provenance::session_tag().expect("session tag should initialize")
         );
+    }
+
+    #[test]
+    fn relative_axis_values_are_rounded_clamped_and_finite() {
+        assert_eq!(normalize_relative_axis(4.4), 4);
+        assert_eq!(normalize_relative_axis(4.6), 5);
+        assert_eq!(normalize_relative_axis(-4.6), -5);
+        assert_eq!(normalize_relative_axis(f64::NAN), 0);
+        assert_eq!(normalize_relative_axis(f64::INFINITY), 0);
+        assert_eq!(normalize_relative_axis(f64::MAX), i32::MAX);
+        assert_eq!(normalize_relative_axis(f64::MIN), i32::MIN);
+    }
+
+    #[test]
+    fn relative_mouse_input_has_no_absolute_flags() {
+        let input = build_relative_mouse_input(12.0, -7.0, provenance::session_tag().unwrap())
+            .expect("relative input should build");
+        let mouse = unsafe { input.Anonymous.mi };
+
+        assert!(mouse.dwFlags.contains(MOUSEEVENTF_MOVE));
+        assert!(!mouse.dwFlags.contains(MOUSEEVENTF_ABSOLUTE));
+        assert!(!mouse.dwFlags.contains(MOUSEEVENTF_VIRTUALDESK));
+        assert_eq!((mouse.dx, mouse.dy), (12, -7));
+    }
+
+    #[test]
+    fn grab_replay_input_uses_the_private_tag() {
+        let input = build_relative_mouse_input(1.0, 2.0, provenance::grab_replay_tag().unwrap())
+            .expect("replay input should build");
+        let mouse = unsafe { input.Anonymous.mi };
+
+        assert_eq!(mouse.dwExtraInfo, provenance::grab_replay_tag().unwrap());
     }
 }
