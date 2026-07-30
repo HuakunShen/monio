@@ -176,7 +176,10 @@ logged-in interactive user session, not as an interactive session-0 service.
 Windows hooks are scoped to a desktop/session, `SendInput` is limited by UIPI
 against higher-integrity targets, and lock/UAC secure desktops are outside the
 normal desktop capture path. The product must treat those transitions as
-explicit release/reconnect states.
+explicit release/reconnect states. The host executable should declare
+`PerMonitorV2` DPI awareness in its application manifest so low-level-hook,
+cursor, and display coordinates share one physical screen coordinate space;
+Monio does not mutate this process-global application policy from a library.
 
 On Linux/X11, ordinary `listen()` keeps reporting absolute motion.
 `grab()` requires XI2 2.1+ and attaches raw relative deltas to

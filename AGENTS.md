@@ -145,7 +145,10 @@ replay that bypasses handler recursion. Mouse Raw Input registration is
 process-global per device class, so grab snapshots, temporarily replaces, and
 restores this process's prior mouse registration. No special permissions are
 needed for ordinary hooks, but `SendInput` cannot inject into a higher
-integrity target under UIPI.
+integrity target under UIPI. A Windows host that compares hook points with
+cursor/display bounds should declare `PerMonitorV2` DPI awareness in its
+application manifest; the library must not set process-global DPI policy for
+an embedding application.
 
 **Linux**: X11 uses XRecord for absolute-only listening, active
 `XGrabKeyboard`/`XGrabPointer` sessions plus XI2 RawMotion for `grab()`, and

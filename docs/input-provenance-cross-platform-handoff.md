@@ -279,23 +279,37 @@ the process-global handlers and registration from being overwritten.
 The focused implementation checks passed on Windows:
 
 ```powershell
+cargo fmt --all -- --check
+cargo test --all-features
 cargo test platform::windows
 cargo test --example windows_relative_grab_detection
 cargo check --example windows_relative_grab_detection
 cargo clippy --all-features --all-targets -- -D warnings
+cargo check --examples
+cargo doc --all-features --no-deps
+cargo run --example synthetic_input_detection
 ```
 
-The first native pass-through invocation:
+The provenance diagnostic had to run as the active interactive user. The
+restricted `codexsandboxoffline` account reproduced `GetCursorPos:
+Access is denied (0x80070005)` even in the standalone `mouse_position`
+example, before any hook was installed. Running the same executable outside
+that sandbox read the cursor successfully. In the interactive context,
+`synthetic_input_detection` classified ControlLeft press/release and both
+pointer moves as `ThisMonioSession`.
+
+Native consume and pass-through invocations:
 
 ```powershell
+cargo run --example windows_relative_grab_detection
 cargo run --example windows_relative_grab_detection -- --pass-through
 ```
 
-successfully registered the hook and Raw Input receiver, emitted
-`HookEnabled`, timed out normally, restored local control, and reported
-`Grab released: true`. No physical mouse motion occurred during its ten-second
-window, so the diagnostic correctly exited unsuccessfully with
-`no physical relative motion was observed`.
+both successfully registered the hook and Raw Input receiver in the
+interactive session, emitted `HookEnabled`, timed out normally, restored local
+control, and reported `Grab released: true`. No physical mouse motion occurred
+during either ten-second window, so both diagnostics correctly exited
+unsuccessfully with `no physical relative motion was observed`.
 
 The following physical observations therefore remain pending and must not be
 inferred from `SendInput`:
@@ -327,6 +341,21 @@ Hard Windows boundaries remain:
 - UAC secure desktop, lock screen, sign-in desktop, and secure-attention
   sequence are outside the normal capture/injection path.
 
+The CrossFlow executable must also declare `PerMonitorV2` DPI awareness in its
+application manifest. `MSLLHOOKSTRUCT::pt` uses per-monitor-aware screen
+coordinates, while cursor/display APIs can be virtualized for a DPI-unaware
+process. This host demonstrated the mismatch: a requested logical target near
+`(1420, 768)` appeared in the low-level hook near `(2131, 1153)`, a roughly
+1.5x difference. DPI awareness is process-global application policy, and
+Microsoft recommends setting it in the executable manifest, so Monio should
+not silently change it from an embeddable library.
+
+Primary DPI references:
+
+- <https://learn.microsoft.com/windows/win32/api/winuser/ns-winuser-msllhookstruct>
+- <https://learn.microsoft.com/windows/win32/sbscs/application-manifests>
+- <https://learn.microsoft.com/windows/win32/api/winuser/nf-winuser-setprocessdpiawarenesscontext>
+
 Separate repository/product work is still required before claiming a complete
 Windows CrossFlow implementation:
 
@@ -339,12 +368,12 @@ Windows CrossFlow implementation:
 - have the CrossFlow state machine release remotely held keys/buttons on
   disconnect, timeout, target switch, lock, and process exit.
 
-The native product acceptance matrix must also cover mixed-DPI
-multi-monitor layouts, negative virtual-screen coordinates, 1000 Hz or faster
-mice, elevated target applications, RDP, fast user switching, lock/unlock,
-sleep/resume, network disconnect, and process crash. These items do not block
-the Rust architecture, but they prevent describing the entire Windows product
-as finished.
+After adding that manifest, the native product acceptance matrix must cover
+mixed-DPI multi-monitor layouts, negative virtual-screen coordinates, 1000 Hz
+or faster mice, elevated target applications, RDP, fast user switching,
+lock/unlock, sleep/resume, network disconnect, and process crash. These items
+do not block the Rust architecture, but they prevent describing the entire
+Windows product as finished.
 
 ## Linux X11 handoff
 

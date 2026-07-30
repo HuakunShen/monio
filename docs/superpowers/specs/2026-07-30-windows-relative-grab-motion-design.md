@@ -405,14 +405,25 @@ cargo test platform::windows
 cargo test --example windows_relative_grab_detection
 cargo check --example windows_relative_grab_detection
 cargo clippy --all-features --all-targets -- -D warnings
+cargo check --examples
+cargo doc --all-features --no-deps
+cargo run --example synthetic_input_detection
 ```
 
-The first native pass-through diagnostic reached `HookEnabled` and
-`Grab released: true`, proving startup and normal cleanup on this host. It
-observed no physical movement during the ten-second window and intentionally
-failed with `no physical relative motion was observed`. Physical direction,
-drag, screen-edge continuity, consume suppression, and one-to-one
-pass-through therefore remain pending.
+The provenance diagnostic passed in the interactive user context. Native
+consume and pass-through diagnostics both reached `HookEnabled` and
+`Grab released: true`, proving startup and normal cleanup on this host. They
+observed no physical movement during their ten-second windows and
+intentionally failed with `no physical relative motion was observed`.
+Physical direction, drag, screen-edge continuity, consume suppression, and
+one-to-one pass-through therefore remain pending.
+
+The native run also confirmed that the CrossFlow host executable needs a
+`PerMonitorV2` DPI-aware manifest. In the DPI-unaware diagnostic process,
+cursor/display coordinates were virtualized while `MSLLHOOKSTRUCT::pt`
+remained per-monitor-aware, producing an observed roughly 1.5x coordinate
+difference. Monio remains an embeddable library and does not mutate this
+process-global application policy.
 
 ## Long-term CrossFlow lifecycle
 
