@@ -16,3 +16,7 @@ pub(crate) const MOUSE_BUTTON_BACK: i32 = 4;
 
 pub(crate) const AXIS_TYPE_SCROLL_VERTICAL: u32 = 1;
 pub(crate) const AXIS_TYPE_SCROLL_HORIZONTAL: u32 = 2;
+#[cfg_attr(not(target_env = "ohos"), allow(dead_code))]
+pub(crate) const AXIS_ACTION_UPDATE: u32 = 2;
+#[cfg_attr(not(target_env = "ohos"), allow(dead_code))]
+pub(crate) const AXIS_EVENT_TYPE_SCROLL: u32 = 2;

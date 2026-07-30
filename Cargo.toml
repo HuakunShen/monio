@@ -47,6 +47,7 @@ libc = { version = "0.2", optional = true }
 
 [target.'cfg(target_env = "ohos")'.dependencies]
 ohos-input-sys = { version = "0.3.4", features = ["api-23"] }
+ohos-sys-opaque-types = "0.1.10"
 
 [features]
 default = ["x11"]

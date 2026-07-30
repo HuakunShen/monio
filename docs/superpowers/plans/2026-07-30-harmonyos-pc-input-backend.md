@@ -586,7 +586,7 @@ git commit -m "feat(ohos): add input simulation"
   `RegistrationApi`, `register`, `unregister`, and native result mapping
 - Produces: functional blocking `run_hook`, `run_grab_hook`, and `stop_hook`
 
-- [ ] **Step 1: Add failing session-policy tests**
+- [x] **Step 1: Add failing session-policy tests**
 
 Keep callback-free policy host-testable in `lifecycle.rs`. Add:
 
@@ -615,7 +615,7 @@ grab + unavailable handler -> dispatch
 listen -> never calls keyboard-hook dispatch logic
 ```
 
-- [ ] **Step 2: Run the policy test to verify red**
+- [x] **Step 2: Run the policy test to verify red**
 
 Run:
 
@@ -626,7 +626,7 @@ cargo test platform::ohos_test::lifecycle::tests::dispatch
 Expected: FAIL because `HandlerMode` and `should_dispatch_original` do not
 exist.
 
-- [ ] **Step 3: Implement session storage and callback adapters**
+- [x] **Step 3: Implement session storage and callback adapters**
 
 In `listen.rs`, create one global:
 
@@ -665,7 +665,7 @@ when the session lock is usable. Do not dispatch on `None`.
 Mouse and axis callbacks call `GrabHandler` for observation but discard its
 return value.
 
-- [ ] **Step 4: Implement the native registration adapter**
+- [x] **Step 4: Implement the native registration adapter**
 
 Implement `RegistrationApi` using these callback pairs:
 
@@ -679,7 +679,7 @@ OH_Input_AddAxisEventMonitorForAll / OH_Input_RemoveAxisEventMonitorForAll
 Convert `Input_Result` to `Result<(), u32>` by extracting the nonzero numeric
 code. Use the same function pointer for add and remove.
 
-- [ ] **Step 5: Implement the blocking lifecycle**
+- [x] **Step 5: Implement the blocking lifecycle**
 
 For listen, install the session, register key/mouse/axis monitors, then emit
 `HookEnabled`. For grab, install the session, register key hook plus mouse/axis
@@ -701,7 +701,7 @@ Reject a second active process session with `Error::AlreadyRunning`.
 because `Hook::stop` has already cleared the shared running flag and the
 blocking session owns cleanup.
 
-- [ ] **Step 6: Verify the backend compiles and host behavior remains intact**
+- [x] **Step 6: Verify the backend compiles and host behavior remains intact**
 
 Run:
 
@@ -714,7 +714,7 @@ cargo test --all-features
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit listen and grab**
+- [x] **Step 7: Commit listen and grab**
 
 ```bash
 git add src/platform/ohos

@@ -23,6 +23,21 @@ pub(crate) enum RegistrationMode {
     Grab,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HandlerMode {
+    Listen,
+    Grab,
+}
+
+pub(crate) fn should_dispatch_original(
+    mode: HandlerMode,
+    handler_returned_some: bool,
+    handler_panicked: bool,
+    handler_available: bool,
+) -> bool {
+    mode == HandlerMode::Grab && (handler_returned_some || handler_panicked || !handler_available)
+}
+
 pub(crate) fn register<A: RegistrationApi>(
     api: &mut A,
     mode: RegistrationMode,
@@ -160,11 +175,7 @@ mod tests {
             register(&mut listen, RegistrationMode::Listen).expect("listen should register");
         assert_eq!(
             listen.calls,
-            [
-                "add-key-monitor",
-                "add-mouse-monitor",
-                "add-axis-monitor"
-            ]
+            ["add-key-monitor", "add-mouse-monitor", "add-axis-monitor"]
         );
         assert_eq!(
             listen_registrations,
@@ -203,11 +214,7 @@ mod tests {
         assert_eq!(register(&mut listen, RegistrationMode::Listen), Err(901));
         assert_eq!(
             listen.calls,
-            [
-                "add-key-monitor",
-                "add-mouse-monitor",
-                "remove-key-monitor"
-            ]
+            ["add-key-monitor", "add-mouse-monitor", "remove-key-monitor"]
         );
 
         let mut grab = FakeApi {
@@ -253,5 +260,39 @@ mod tests {
 
         assert_eq!(unregister(&mut api, &mut registrations), Ok(()));
         assert_eq!(api.calls.len(), 3);
+    }
+
+    #[test]
+    fn dispatch_policy_consumes_only_an_explicit_grab_none() {
+        assert!(should_dispatch_original(
+            HandlerMode::Grab,
+            true,
+            false,
+            true
+        ));
+        assert!(!should_dispatch_original(
+            HandlerMode::Grab,
+            false,
+            false,
+            true
+        ));
+        assert!(should_dispatch_original(
+            HandlerMode::Grab,
+            false,
+            true,
+            true
+        ));
+        assert!(should_dispatch_original(
+            HandlerMode::Grab,
+            false,
+            false,
+            false
+        ));
+        assert!(!should_dispatch_original(
+            HandlerMode::Listen,
+            true,
+            true,
+            false
+        ));
     }
 }

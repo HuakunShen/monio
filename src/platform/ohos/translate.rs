@@ -1,17 +1,13 @@
 use super::constants::{
-    AXIS_TYPE_SCROLL_HORIZONTAL, AXIS_TYPE_SCROLL_VERTICAL, KEY_ACTION_CANCEL,
-    KEY_ACTION_DOWN, KEY_ACTION_UP, MOUSE_ACTION_BUTTON_DOWN, MOUSE_ACTION_BUTTON_UP,
-    MOUSE_ACTION_CANCEL, MOUSE_ACTION_MOVE, MOUSE_BUTTON_NONE,
+    AXIS_TYPE_SCROLL_HORIZONTAL, AXIS_TYPE_SCROLL_VERTICAL, KEY_ACTION_CANCEL, KEY_ACTION_DOWN,
+    KEY_ACTION_UP, MOUSE_ACTION_BUTTON_DOWN, MOUSE_ACTION_BUTTON_UP, MOUSE_ACTION_CANCEL,
+    MOUSE_ACTION_MOVE, MOUSE_BUTTON_NONE,
 };
-use super::keycodes::{
-    button_from_native, button_to_native, key_to_keycode, keycode_to_key,
-};
+use super::keycodes::{button_from_native, button_to_native, key_to_keycode, keycode_to_key};
 use crate::error::{Error, Result};
 use crate::event::{Button, Event, EventType, ScrollDirection};
 use crate::keycode::Key;
-use crate::state::{
-    self, MASK_ALT, MASK_CTRL, MASK_META, MASK_SHIFT, button_to_mask,
-};
+use crate::state::{self, MASK_ALT, MASK_CTRL, MASK_META, MASK_SHIFT, button_to_mask};
 
 fn modifier_mask(key: Key) -> u32 {
     match key {
@@ -40,12 +36,7 @@ pub(crate) fn translate_key(action: i32, keycode: i32) -> Option<Event> {
     }
 }
 
-pub(crate) fn translate_mouse(
-    action: i32,
-    button: i32,
-    x: f64,
-    y: f64,
-) -> Option<Event> {
+pub(crate) fn translate_mouse(action: i32, button: i32, x: f64, y: f64) -> Option<Event> {
     match action {
         MOUSE_ACTION_MOVE => Some(if state::is_button_held() {
             Event::mouse_dragged(x, y)
@@ -66,12 +57,7 @@ pub(crate) fn translate_mouse(
     }
 }
 
-pub(crate) fn translate_axis(
-    axis_type: u32,
-    x: f64,
-    y: f64,
-    value: f64,
-) -> Option<Event> {
+pub(crate) fn translate_axis(axis_type: u32, x: f64, y: f64, value: f64) -> Option<Event> {
     if value == 0.0 || !value.is_finite() {
         return None;
     }
@@ -108,10 +94,7 @@ pub(crate) fn simulation_spec(event: &Event) -> Result<SimulationSpec> {
                 Error::NotSupported("HarmonyOS key event is missing keyboard data".into())
             })?;
             let keycode = key_to_keycode(keyboard.key).ok_or_else(|| {
-                Error::NotSupported(format!(
-                    "HarmonyOS cannot simulate key {:?}",
-                    keyboard.key
-                ))
+                Error::NotSupported(format!("HarmonyOS cannot simulate key {:?}", keyboard.key))
             })?;
             let action = if event.event_type == EventType::KeyPressed {
                 KEY_ACTION_DOWN
@@ -134,9 +117,7 @@ pub(crate) fn simulation_spec(event: &Event) -> Result<SimulationSpec> {
                 )));
             }
             let button = button_to_native(button).ok_or_else(|| {
-                Error::NotSupported(format!(
-                    "HarmonyOS cannot simulate mouse button {button:?}"
-                ))
+                Error::NotSupported(format!("HarmonyOS cannot simulate mouse button {button:?}"))
             })?;
             let (x, y) = checked_coordinates(mouse.x, mouse.y)?;
             let action = if event.event_type == EventType::MousePressed {
@@ -193,9 +174,7 @@ mod tests {
     use crate::error::Error;
     use crate::event::{Button, EventType, InputOrigin, ScrollDirection};
     use crate::keycode::Key;
-    use crate::state::{
-        self, MASK_BUTTON1, MASK_SHIFT, is_button_pressed, is_shift_held,
-    };
+    use crate::state::{self, MASK_BUTTON1, MASK_SHIFT, is_button_pressed, is_shift_held};
 
     #[test]
     fn translates_native_primitives_to_owned_events_and_updates_state() {
@@ -219,18 +198,19 @@ mod tests {
         assert_eq!(cancelled.keyboard.as_ref().unwrap().key, Key::KeyA);
         assert!(translate_key(99, 2017).is_none());
 
-        let mouse_down =
-            translate_mouse(2, 0, 10.0, 20.0).expect("button down should translate");
+        let mouse_down = translate_mouse(2, 0, 10.0, 20.0).expect("button down should translate");
         assert_eq!(mouse_down.event_type, EventType::MousePressed);
-        assert_eq!(mouse_down.mouse.as_ref().unwrap().button, Some(Button::Left));
+        assert_eq!(
+            mouse_down.mouse.as_ref().unwrap().button,
+            Some(Button::Left)
+        );
         assert!(mouse_down.mask & MASK_BUTTON1 != 0);
         assert!(is_button_pressed(MASK_BUTTON1));
 
         let dragged = translate_mouse(1, -1, 11.0, 21.0).expect("move should translate");
         assert_eq!(dragged.event_type, EventType::MouseDragged);
 
-        let mouse_up =
-            translate_mouse(3, 0, 12.0, 22.0).expect("button up should translate");
+        let mouse_up = translate_mouse(3, 0, 12.0, 22.0).expect("button up should translate");
         assert_eq!(mouse_up.event_type, EventType::MouseReleased);
         assert_eq!(mouse_up.mask & MASK_BUTTON1, 0);
         assert!(!is_button_pressed(MASK_BUTTON1));

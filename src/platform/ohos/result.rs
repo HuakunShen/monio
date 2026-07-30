@@ -43,9 +43,9 @@ pub(crate) fn hook_stop_error(operation: &str, code: u32) -> Error {
 pub(crate) fn simulate_error(operation: &str, code: u32) -> Error {
     let details = details(operation, code);
     match classify_code(code) {
-        FailureKind::PermissionDenied => Error::PermissionDenied(format!(
-            "{details}; required permission: CONTROL_DEVICE"
-        )),
+        FailureKind::PermissionDenied => {
+            Error::PermissionDenied(format!("{details}; required permission: CONTROL_DEVICE"))
+        }
         FailureKind::Unsupported => Error::NotSupported(details),
         _ => Error::SimulateFailed(details),
     }
@@ -83,21 +83,22 @@ mod tests {
 
     #[test]
     fn maps_hook_start_errors_with_operation_permission_and_code() {
-        let permission =
-            hook_start_error("OH_Input_AddKeyEventMonitor", 201, "INPUT_MONITORING");
+        let permission = hook_start_error("OH_Input_AddKeyEventMonitor", 201, "INPUT_MONITORING");
         assert!(matches!(permission, Error::PermissionDenied(_)));
         let message = permission.to_string();
         assert!(message.contains("OH_Input_AddKeyEventMonitor"));
         assert!(message.contains("INPUT_MONITORING"));
         assert!(message.contains("201"));
 
-        let unsupported =
-            hook_start_error("OH_Input_AddKeyEventHook", 801, "HOOK_KEY_EVENT");
+        let unsupported = hook_start_error("OH_Input_AddKeyEventHook", 801, "HOOK_KEY_EVENT");
         assert!(matches!(unsupported, Error::NotSupported(_)));
         assert!(unsupported.to_string().contains("801"));
 
-        let service =
-            hook_start_error("OH_Input_AddMouseEventMonitor", 3_800_001, "INPUT_MONITORING");
+        let service = hook_start_error(
+            "OH_Input_AddMouseEventMonitor",
+            3_800_001,
+            "INPUT_MONITORING",
+        );
         assert!(matches!(service, Error::HookStartFailed(_)));
         assert!(service.to_string().contains("3800001"));
     }

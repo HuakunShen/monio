@@ -309,10 +309,7 @@ mod tests {
             assert_eq!(button_to_native(button), Some(code));
         }
 
-        assert_eq!(
-            button_from_native(42),
-            crate::event::Button::Unknown(42)
-        );
+        assert_eq!(button_from_native(42), crate::event::Button::Unknown(42));
         assert_eq!(
             button_to_native(crate::event::Button::Unknown(42)),
             Some(42)

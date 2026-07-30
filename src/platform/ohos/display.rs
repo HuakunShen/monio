@@ -20,10 +20,7 @@ pub fn mouse_position() -> Result<(f64, f64)> {
     // valid for this synchronous call.
     match unsafe { OH_Input_GetPointerLocation(&mut display_id, &mut x, &mut y) } {
         Ok(()) => Ok((x, y)),
-        Err(code) => Err(platform_error(
-            "OH_Input_GetPointerLocation",
-            code.0.get(),
-        )),
+        Err(code) => Err(platform_error("OH_Input_GetPointerLocation", code.0.get())),
     }
 }
 

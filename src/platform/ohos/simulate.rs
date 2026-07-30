@@ -117,9 +117,7 @@ fn injection_result(operation: &str, code: i32) -> Result<()> {
 
 pub fn simulate(event: &Event) -> Result<()> {
     match simulation_spec(event)? {
-        SimulationSpec::Key { action, keycode } => {
-            NativeKeyEvent::new()?.inject(action, keycode)
-        }
+        SimulationSpec::Key { action, keycode } => NativeKeyEvent::new()?.inject(action, keycode),
         SimulationSpec::Mouse {
             action,
             button,

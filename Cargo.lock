@@ -704,6 +704,7 @@ dependencies = [
  "objc2-core-graphics",
  "objc2-foundation",
  "ohos-input-sys",
+ "ohos-sys-opaque-types",
  "ratatui",
  "serde",
  "serde_json",
