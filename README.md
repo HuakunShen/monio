@@ -8,14 +8,15 @@ A pure Rust cross-platform input hook library with **proper drag detection**.
 
 ## Features
 
-- **Cross-platform**: macOS, Windows, and Linux (X11/evdev) support
+- **Cross-platform**: macOS, Windows, Linux (X11/evdev), and a compile-checked
+  HarmonyOS PC/2in1 backend
 - **Proper drag detection**: Distinguishes `MouseDragged` from `MouseMoved` events
 - **Event grabbing**: Block events from reaching other applications (global hotkeys)
 - **Async/Channel support**: Non-blocking event receiving with std or tokio channels
 - **Event recording & playback**: Record and replay macros (requires `recorder` feature)
 - **Input statistics**: Analyze typing speed, mouse distance, etc. (requires `statistics` feature)
 - **Display queries**: Get monitor info, DPI scale, system settings (multi-monitor support)
-- **Pure Rust**: No C dependencies (uses native Rust bindings)
+- **Rust API**: Platform backends use native Rust bindings
 - **Event simulation**: Programmatically generate keyboard and mouse events
 - **Thread-safe**: Atomic state tracking for reliable button/modifier detection
 
@@ -132,12 +133,13 @@ fn main() {
 
 **Platform Support for Grabbing:**
 
-| Platform      | Grab Support | Notes                                               |
-| ------------- | ------------ | --------------------------------------------------- |
-| macOS         | ✅ Full      | Via CGEventTap                                      |
-| Windows       | ✅ Full      | Via low-level hooks                                 |
-| Linux/X11     | ✅ Active    | XGrabKeyboard/XGrabPointer with XTest pass-through  |
-| Linux/Wayland | ⚠️ Limited   | See [Wayland Limitation](#wayland-limitation) below |
+| Platform      | Grab Support     | Notes                                               |
+| ------------- | ---------------- | --------------------------------------------------- |
+| macOS         | ✅ Full          | Via CGEventTap                                      |
+| Windows       | ✅ Full          | Via low-level hooks                                 |
+| Linux/X11     | ✅ Active        | XGrabKeyboard/XGrabPointer with XTest pass-through  |
+| Linux/Wayland | ⚠️ Limited       | See [Wayland Limitation](#wayland-limitation) below |
+| HarmonyOS PC  | ⚠️ Keyboard only | API 26+; compile-checked, pointer observe-only       |
 
 ### Channel-Based Listening (Non-Blocking)
 
@@ -375,6 +377,11 @@ button, wheel, and pointer events without access to `/dev/input` or
 `/dev/uinput`. Requests from other X11 clients and unmatched events remain
 `Unknown`.
 
+HarmonyOS Input Kit monitor/hook callbacks do not expose evidence sufficient
+to identify this Monio process as the injector. All captured HarmonyOS events
+therefore remain `InputOrigin::Unknown`; simultaneous capture and
+retransmission must not assume that self-injected events can be filtered.
+
 Run the native macOS, Windows, or Linux/X11 diagnostic. macOS requires
 Accessibility permission:
 
@@ -398,6 +405,28 @@ Requires **Accessibility permissions**. The app will prompt for permission on fi
 ### Windows
 
 No special permissions required for hooking. Simulation may require the app to be running as Administrator in some contexts.
+
+### HarmonyOS PC/2in1
+
+The backend targets HarmonyOS PC/2in1 API 26.0.0 or newer and uses Input Kit:
+
+- `ohos.permission.INPUT_MONITORING` for keyboard, mouse, and axis monitoring;
+- `ohos.permission.HOOK_KEY_EVENT` for keyboard suppression/pass-through;
+- `ohos.permission.CONTROL_DEVICE` for direct key and global mouse injection.
+
+It does not use the legacy `OH_Input_RequestInjection` authorization flow and
+does not request `ohos.permission.INTERCEPT_INPUT_EVENT`.
+
+`grab()` can consume keyboard events. Returning `Some(_)` dispatches the
+original native keyboard event; it cannot rewrite it. Mouse and wheel events
+are delivered to the handler for observation, but `None` cannot consume them.
+Pointer position is supported; display enumeration, primary-display lookup,
+display-at-point, and system input settings return `Error::NotSupported`.
+
+The backend has passed Rust checks for `aarch64-unknown-linux-ohos` on Linux,
+but has not been linked, packaged, signed, or run on a HarmonyOS PC. See
+[`docs/harmonyos-pc-input-backend.md`](docs/harmonyos-pc-input-backend.md) for
+the SDK split, evidence, exact limitations, and native acceptance matrix.
 
 ### Linux
 

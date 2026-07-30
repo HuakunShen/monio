@@ -4,13 +4,18 @@
 //!
 //! ## Features
 //!
-//! - Cross-platform support (macOS, Windows, Linux)
+//! - Cross-platform support (macOS, Windows, Linux, plus a compile-checked
+//!   HarmonyOS PC/2in1 backend)
 //! - Proper drag detection (distinguishes `MouseDragged` from `MouseMoved`)
 //! - Event grabbing (consume events to prevent them from reaching other apps)
 //! - Clean, Rust-idiomatic API with traits and enums
 //! - Thread-safe design with atomic state tracking
 //! - Event simulation support
-//! - Input provenance for Monio's own macOS and Windows simulation events
+//! - Input provenance where the active platform exposes reliable evidence
+//!
+//! The HarmonyOS backend targets PC/2in1 devices running API 26.0.0 or newer.
+//! Its generic grab support can consume keyboard events; pointer events remain
+//! observe-only. Captured HarmonyOS events report [`InputOrigin::Unknown`].
 //!
 //! ## Quick Start
 //!

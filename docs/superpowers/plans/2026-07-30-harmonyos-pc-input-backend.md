@@ -734,7 +734,7 @@ git commit -m "feat(ohos): add input monitoring and key grab"
 - Consumes: the completed backend behavior and fresh command output
 - Produces: accurate public documentation and a checked implementation record
 
-- [ ] **Step 1: Update platform-facing documentation**
+- [x] **Step 1: Update platform-facing documentation**
 
 Document these exact facts:
 
@@ -752,7 +752,7 @@ Linux cargo check is not native linking or runtime verification
 
 Do not describe HarmonyOS support as natively verified.
 
-- [ ] **Step 2: Update the dedicated research document status**
+- [x] **Step 2: Update the dedicated research document status**
 
 Change its status from “design approved; implementation has not started” to
 “implementation compile-checked”. Add the final commit/file structure,
@@ -760,7 +760,7 @@ dependency resolution, exact verification commands, pass/fail results, and the
 remaining Native SDK/PC acceptance matrix. Record any warning or limitation
 found during implementation.
 
-- [ ] **Step 3: Run formatting and inspect the diff**
+- [x] **Step 3: Run formatting and inspect the diff**
 
 Run:
 
@@ -773,7 +773,7 @@ git status --short
 
 Expected: no whitespace errors and only HarmonyOS implementation/doc files.
 
-- [ ] **Step 4: Run the complete fresh verification set**
+- [x] **Step 4: Run the complete fresh verification set**
 
 Run:
 
@@ -789,7 +789,7 @@ cargo check --target aarch64-unknown-linux-ohos --all-features
 Expected: all commands PASS. Record that no executable/HAP was linked because
 the Linux host lacks the HarmonyOS Native SDK and `libohinput.so`.
 
-- [ ] **Step 5: Mark this plan complete and commit documentation**
+- [x] **Step 5: Mark this plan complete and commit documentation**
 
 Check every completed step in this file, then:
 
@@ -798,7 +798,7 @@ git add README.md src/hook.rs src/lib.rs docs
 git commit -m "docs: document HarmonyOS PC backend"
 ```
 
-- [ ] **Step 6: Review branch state**
+- [x] **Step 6: Review branch state**
 
 Run:
 

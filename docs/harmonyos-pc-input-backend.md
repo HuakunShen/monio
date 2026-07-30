@@ -1,6 +1,6 @@
 # HarmonyOS PC input backend
 
-Status: design approved; implementation has not started.
+Status: implementation compile-checked; native linking and PC verification pending.
 
 Last updated: 2026-07-30
 
@@ -21,6 +21,8 @@ Monio. Compile checks alone must not be described as native verification.
 - Use `ohos-input-sys` 0.3.4 as the raw FFI dependency with its `api-23`
   feature. The required C functions were introduced by API 21 or earlier;
   API 26 changes the permission path rather than replacing those functions.
+- Use `ohos-sys-opaque-types` 0.1.10 directly for the callback event pointer
+  types referenced by `ohos-input-sys` function signatures.
 - Implement global keyboard grab with `OH_Input_AddKeyEventHook`.
 - Keep pointer events observe-only in the generic `grab()` API. The public
   Input Kit mouse interceptor has no equivalent of
@@ -251,6 +253,7 @@ The OHOS dependency is target-specific:
 ```toml
 [target.'cfg(target_env = "ohos")'.dependencies]
 ohos-input-sys = { version = "0.3.4", features = ["api-23"] }
+ohos-sys-opaque-types = "0.1.10"
 ```
 
 `ohos-input-sys` links the native library as `ohinput`. Rust metadata checking
@@ -263,17 +266,27 @@ The implementation is isolated under:
 ```text
 src/platform/ohos/
 ├── mod.rs
+├── constants.rs
+├── lifecycle.rs
+├── result.rs
 ├── listen.rs
 ├── translate.rs
 ├── keycodes.rs
 ├── simulate.rs
-└── display.rs
+├── display.rs
+└── test_module.rs
 ```
 
 Responsibilities:
 
 - `mod.rs`: expose the platform contract expected by `Hook`, channels,
   recorder, statistics, display helpers, and simulation helpers.
+- `constants.rs`: keep documented native integer values available to the
+  host-tested translation code without importing the native binding.
+- `lifecycle.rs`: implement transactional registration, reverse-order
+  rollback/cleanup, and the keyboard fail-open dispatch policy.
+- `result.rs`: classify documented Input Kit result codes and map them to
+  operation-specific Monio errors.
 - `listen.rs`: own monitor/hook registration, callback entry points, active
   session state, error propagation, stop signaling, and cleanup.
 - `translate.rs`: convert primitive OHOS action, key, button, coordinate, and
@@ -284,6 +297,8 @@ Responsibilities:
   objects. All native objects use scoped cleanup.
 - `display.rs`: implement pointer position through Input Kit and return
   `Error::NotSupported` for display topology and system settings.
+- `test_module.rs`: compile the pure OHOS modules into Linux-hosted unit tests
+  without linking `libohinput.so`.
 
 Unsafe code stays inside the OHOS platform module. Public callers do not
 receive native pointers, event IDs, or HarmonyOS-specific types.
@@ -479,6 +494,7 @@ Required cross-target checks:
 ```bash
 cargo check --target aarch64-unknown-linux-ohos
 cargo check --target aarch64-unknown-linux-ohos --all-features
+cargo clippy --target aarch64-unknown-linux-ohos --all-features -- -D warnings
 ```
 
 Required host regressions:
@@ -490,13 +506,46 @@ cargo fmt --all -- --check
 cargo doc --all-features --no-deps
 ```
 
-The isolated worktree baseline before implementation passed:
+Implementation code is recorded in these ordered feature commits:
 
 ```text
-cargo build: success
-cargo test: 5 unit tests passed
-cargo test: 9 doc tests passed, 1 ignored
+8485c0c feat(ohos): add target routing
+d57f684 feat(ohos): add event translation core
+fa5f627 feat(ohos): add transactional registration
+f1dd252 feat(ohos): add input simulation
+e8fee52 feat(ohos): add input monitoring and key grab
 ```
+
+The initial red target check failed because `x11` was selected for OHOS and
+its build script attempted cross-platform `pkg-config`. The routing commit
+excluded `target_env = "ohos"` from ordinary Linux dependencies; subsequent
+OHOS checks select `ohos-input-sys` and no longer build X11.
+
+The final result below was recorded against the documentation-complete tree.
+
+Final verification on 2026-07-30:
+
+```text
+cargo test --all-features
+  PASS: 29 unit tests
+  PASS: 12 doc tests; 3 doc tests ignored
+cargo clippy --all-features --all-targets -- -D warnings
+  PASS
+cargo fmt --all -- --check
+  PASS
+cargo doc --all-features --no-deps
+  PASS
+cargo check --target aarch64-unknown-linux-ohos
+  PASS
+cargo check --target aarch64-unknown-linux-ohos --all-features
+  PASS
+cargo clippy --target aarch64-unknown-linux-ohos --all-features -- -D warnings
+  PASS
+```
+
+These commands compile Rust metadata and native FFI call signatures. They do
+not invoke an OHOS linker, resolve `libohinput.so`, build a HAP, exercise the
+permissions, or run a callback on a HarmonyOS PC.
 
 ## Native PC acceptance matrix
 
@@ -547,7 +596,8 @@ and observed output.
 
 1. Inject every supported key category and verify press/release balance.
 2. Inject mouse movement on each display.
-3. Inject every supported mouse button and wheel form.
+3. Inject every supported mouse button and verify that `MouseWheel` simulation
+   returns `Error::NotSupported` in this implementation.
 4. Verify missing permission and service errors.
 5. Determine whether injected events are recaptured by monitors and hooks.
 6. Establish whether Input Kit exposes any evidence suitable for exact
