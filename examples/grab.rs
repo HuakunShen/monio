@@ -43,11 +43,10 @@ fn check_linux_permissions() {
         // Check if we're on Wayland
         let is_wayland = std::env::var("WAYLAND_DISPLAY").is_ok();
         if is_wayland {
-            eprintln!("\n⚠️  WAYLAND DETECTED - IMPORTANT LIMITATION:");
-            eprintln!("   Wayland compositors use libinput which may not recognize");
-            eprintln!("   re-injected events from virtual devices. Grab mode may");
-            eprintln!("   block all input instead of passing through allowed events.");
-            eprintln!("   This is a fundamental limitation of evdev+ uinput on Wayland.");
+            eprintln!("\nWayland detected:");
+            eprintln!("   Consumed events use an exclusive evdev grab.");
+            eprintln!("   Passed events are re-injected through uinput.");
+            eprintln!("   GNOME 46 is verified; validate other compositors separately.");
             eprintln!();
         }
 

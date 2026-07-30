@@ -1,16 +1,21 @@
 # Cross-platform input provenance handoff
 
 Status: macOS and Windows self-injection detection are implemented and natively
-verified. Linux evdev/uinput exact-device classification has passed a native
-self-loopback test, but its unrelated-device, grab, restart, and hotplug matrix
-is still pending. Linux X11 request correlation is implemented and natively
+verified. Linux evdev/uinput exact-device classification has passed native X11
+and Wayland self-loopback tests; exclusive grab consumption and selective
+uinput pass-through are verified on GNOME 46 Wayland, while the unrelated-device,
+restart, hotplug, and broader compositor matrix is still pending. Linux X11
+request correlation is implemented and natively
 verified on GNOME X11. X11 active keyboard/pointer grab support is implemented
 and natively verified on GNOME X11 and an isolated Xvfb server. XI2 relative
 grab motion and relative XTest injection are implemented; automated
 initialization/injection/cleanup checks and native physical RawMotion/drag
-capture pass. Explicit screen-edge and pass-through feel confirmation remains
-pending. Wayland
-portal/libei is not implemented.
+capture, screen-edge continuation, and gesture pass-through all pass. Wayland
+InputCapture receive and RemoteDesktop/EIS target injection now have native
+GNOME proofs of concept. Target injection can activate an armed source barrier,
+and injection into a physically activated capture session is echoed back to the
+receiver. CrossFlow must therefore disable source capture while a machine holds
+an inbound target lease. A production portal backend is not yet implemented.
 
 Last updated: 2026-07-30
 
@@ -47,9 +52,9 @@ The equivalent implementation mechanism is platform-specific:
 | --- | --- | --- |
 | macOS Core Graphics | Random process-session `EventSourceUserData` plus current source PID | Implemented and natively verified |
 | Windows low-level hooks | Random process-session `dwExtraInfo`, plus injected hook flags | Implemented and natively verified |
-| Linux evdev/uinput | Exact live character-device number owned by Monio's uinput handle | Implemented; native self-loopback verified, broader matrix pending |
+| Linux evdev/uinput | Exact live character-device number owned by Monio's uinput handle | Implemented; native X11/Wayland self-loopback and GNOME Wayland grab/pass-through verified, broader matrix pending |
 | Linux X11 XRecord/XTest | Persistent XTest client ID plus ordered request/device-event correlation | Implemented and natively verified on GNOME X11 |
-| Wayland portal/libei | Compositor-mediated device/session evidence; at minimum exclude virtual devices from local-source capture | Proposed; backend does not exist |
+| Wayland portal/libei | No stable per-event self-injection identity was observed on GNOME; use mutually exclusive source/target leases | Native InputCapture receiver and RemoteDesktop/EIS sender proofs pass; feedback/barrier hazards verified; production backend pending |
 
 Provenance and suppression are separate responsibilities. X11 `listen()` uses
 XRecord request correlation for self-injection classification. X11 `grab()`
@@ -518,7 +523,8 @@ Relevant files:
 1. opens a dedicated X connection and maps a 1x1 off-screen,
    override-redirect `InputOnly` window;
 2. requires XI2 2.1+ and selects `XI_RawMotion` for the master pointer;
-3. acquires `XGrabKeyboard` first and `XGrabPointer` second;
+3. acquires `XGrabKeyboard` first and a synchronous `XGrabPointer` second,
+   then uses `SyncPointer` to run until the next button event;
 4. rolls the keyboard grab back if pointer acquisition fails;
 5. reports `AlreadyGrabbed`, `GrabInvalidTime`, `GrabNotViewable`, and
    `GrabFrozen` with device-specific startup errors;
@@ -527,9 +533,9 @@ Relevant files:
 7. consumes events whose handler returns `None`;
 8. temporarily deselects raw motion, releases, XTest-replays, reacquires, and
    reselects around passed standalone motion;
-9. yields a complete pointer gesture after a passed `ButtonPress`, because the
-   receiving X11 client owns an implicit pointer grab until release, then
-   reacquires the pointer and raw selection;
+9. uses `ReplayPointer` with `CurrentTime` for passed pointer-button events,
+   yielding the original event to the receiving X11 client and its implicit
+   grab until release, then reacquires the pointer and raw selection;
 10. deselects raw motion, ungrabs both devices, destroys the window, and closes
     the connection on normal stop or error. X11 also releases the grabs
     automatically if the process connection dies.
@@ -564,8 +570,8 @@ Both runs passed with these independently observed behaviors:
 - passed W press/release: handler 2, observer 2;
 - consumed left-button press/release: handler 2, observer 0;
 - passed right-button gesture: handler observed its start, observer received
-  press and release;
-- consumed pointer motion: handler 1, observer 0;
+  press, button-held motion, and release;
+- consumed standalone pointer motion: handler 1, observer 0;
 - an existing keyboard grab produced the expected conflict error;
 - an existing pointer grab caused pointer acquisition to fail and the
   diagnostic then acquired the keyboard, proving keyboard rollback.
@@ -598,6 +604,11 @@ The diagnostic observer is deliberately placed at root coordinates `(256,
 window before generating events. Its original `(32, 32)` location was under
 GNOME's top-bar/compositor overlay, so a passed right-button gesture went to
 GNOME Shell rather than the observer and produced a false failure.
+
+The first diagnostic used an immediate passed button pair, which did not catch
+the later native drag failure. It now waits between the passed press, motion,
+and release and requires the observer's `MotionNotify` to carry the expected
+held-button mask.
 
 ### X11 relative motion for CrossFlow
 
@@ -690,17 +701,30 @@ cargo run --features x11 --example x11_relative_grab_detection -- --pass-through
 ```
 
 The consume run received 992 relative motion events, including 176
-`MouseDragged` events. The pass-through run received 252 relative motion
-events, including 129 `MouseDragged` events. Both runs observed positive and
-negative X and Y deltas, reported zero motion events without relative data,
-and released the grab at timeout. This verifies physical XI2 RawMotion
-delivery, sparse-axis decoding, direction signs, drag classification, and
-normal-stop cleanup on this system.
+`MouseDragged` events. It observed both signs on both axes, reported zero
+motion events without relative data, and continued reporting nonzero deltas
+while the pointer was held against a screen edge.
 
-The output alone does not prove that raw deltas continued while repeatedly
-pushing against a screen edge, or that local pass-through felt one-to-one
-without feedback, doubling, or jumps. Record those two observations explicitly
-before marking edge and pass-through behavior natively accepted.
+The original pass-through implementation used asynchronous `XGrabPointer`,
+released it, and synthesized another press with XTest. A delayed drag
+regression test proved that the target received neither the complete button
+pair nor button-held motion: Monio reacquired the pointer while the physical
+button was still down. X11 cannot `ReplayPointer` an event frozen directly by
+`XGrabPointer`; the corrected path uses a synchronous pointer grab, arms it
+with `SyncPointer`, and replays the original frozen button event with
+`ReplayPointer`. `CurrentTime` is required here; using the event timestamp left
+the request ineffective on the tested server.
+
+After the fix, the isolated Xvfb observer received the passed press, a
+`MotionNotify` carrying the held-button mask, and the release. The final native
+pass-through run received 1,298 ordinary relative events, zero missing-relative
+events, all four direction signs, and zero `MouseDragged` callbacks. The user
+confirmed that drag-to-highlight worked. Zero drag callbacks are expected in
+this mode because Monio sees the passed press, then the receiving application
+owns the gesture until release. Both native runs released the grab at timeout.
+This verifies physical RawMotion delivery, direction signs, edge continuation,
+consume-mode drag classification, gesture pass-through, and normal-stop cleanup
+on this GNOME X11 system.
 
 Do not make the first CrossFlow implementation depend on selective local
 pass-through. While control is on B or C, all captured keyboard and pointer
@@ -815,14 +839,49 @@ cargo fmt --check
 Host permissions and udev rules are part of the test fixture. Do not hide
 permission failures by skipping the native test.
 
-### Existing Wayland-related comments need revalidation
+### Native GNOME Wayland verification on 2026-07-30
 
-Current source comments say a Wayland compositor may ignore re-injected uinput
-events. That behavior is compositor/environment dependent and has not been
-revalidated as part of the provenance work.
+The same host was restarted into a native GNOME Wayland session:
 
-Record the compositor, desktop environment, libinput version, privileges, and
-observed behavior before turning that comment into a product invariant.
+```text
+XDG_SESSION_TYPE=wayland
+XDG_CURRENT_DESKTOP=ubuntu:GNOME
+GNOME Shell 46.0
+kernel 7.0.0-28-generic
+libinput 1.25.0
+```
+
+The user was an active member of the `input` group. `/dev/input/event*` and
+`/dev/uinput` were `root:input 0660`. Codex's default sandbox hid these device
+nodes and supplementary groups, so native commands had to run outside that
+sandbox; this was a tooling boundary rather than a host permission failure.
+
+The evdev provenance command passed unchanged:
+
+```bash
+cargo run --no-default-features --features evdev \
+  --example synthetic_input_detection
+```
+
+The listener observed the ControlLeft press/release and both relative pointer
+moves as `Injected { injector: ThisMonioSession }`.
+
+The selective-grab command was then exercised against ordinary Wayland
+applications:
+
+```bash
+cargo run --no-default-features --features evdev --example grab
+```
+
+The evdev grab received a physical left-button press and Q/W/E key presses.
+Q/W/E were consumed and did not reach the focused application. The allowed
+A/B/C keys reached it, and passed pointer click, motion, and drag operations
+also remained effective. The ten-second safety timeout released the devices.
+
+This disproves the previous claim that uinput pass-through failure is a
+fundamental Wayland limitation. Pass-through remains compositor-dependent:
+GNOME 46 is positively verified, while KDE and other compositors still require
+native testing.
 
 ### evdev grab suitability for CrossFlow
 
@@ -909,6 +968,185 @@ Primary references:
 - <https://libinput.pages.freedesktop.org/libei/>
 - <https://libinput.pages.freedesktop.org/libei/api/group__libei-device.html>
 
+### Native GNOME portal capability probe on 2026-07-30
+
+The current GNOME Wayland session exposes both required portal interfaces:
+
+```text
+xdg-desktop-portal 1.18.4
+xdg-desktop-portal-gnome 46.2
+org.freedesktop.portal.InputCapture version 1
+  SupportedCapabilities = 15
+  ConnectToEIS available
+org.freedesktop.portal.RemoteDesktop version 2
+  AvailableDeviceTypes = 7
+  ConnectToEIS available
+libei runtime 1.2.1
+```
+
+InputCapture version 1 means this host can exercise zones, barriers, capture,
+release, and EIS transport, but not the version-2 persistence/restore-token
+flow. The libei runtime is installed; its development headers and pkg-config
+metadata are not currently installed. The proof of concept uses `ashpd 0.13.13`
+and the pure-Rust `reis 0.7.1`, so it does not link the system libei runtime.
+
+`ashpd` and `reis` solve different parts of the path. `ashpd` handles the
+portal/D-Bus session and returns an EIS file descriptor. It does not encode or
+decode the EIS event stream. That stream still needs the system `libei`, a
+protocol client such as `reis`, or a new implementation. The legacy
+RemoteDesktop `Notify*` D-Bus methods cannot replace the InputCapture receiver,
+and GNOME rejected mixing `NotifyPointerMotion` with `ConnectToEIS` on the same
+RemoteDesktop session.
+
+The `reis 0.7.1` source used here was statically reviewed against upstream
+commit `02bc1b52aca10231d380c0cf236d69ec3c56cae4`; Cargo locks crates.io checksum
+`4b967ec6489a42067a20724f11987bb96178ea796873cbe1afd25fb93ee6f85f`. The crate
+forbids unsafe Rust and has no build script, proc macro, external-command
+execution, or network client. It is nevertheless a small project without a
+published security policy or release tags, and it has not received a
+production security audit. Static review found denial-of-service hardening
+gaps for a malicious local EIS peer: unbounded pre-parse byte/file-descriptor
+queues, an object-ID overflow edge, and an `unwrap` on file-descriptor cloning.
+`REIS_DEBUG` also logs protocol/input content. The portal supplies a local
+compositor-owned socket, which narrows but does not erase that risk.
+
+Use `reis` as a replaceable diagnostic dependency. For production, prefer
+system `libei`, or pin and harden a reviewed `reis` fork behind Monio's own
+adapter. `reis` is not architecturally mandatory.
+
+The portal reports `SupportedCapabilities = 15`, although the current public
+specification defines only bits 1 (keyboard), 2 (pointer), and 4
+(touchscreen), and requires clients to ignore unknown capabilities. The strict
+`ashpd 0.13.13` property decoder rejects the unknown bit 8. The proof of
+concept therefore requests the required keyboard/pointer mask directly and
+uses the granted session mask instead of calling
+`InputCapture::supported_capabilities()`.
+
+### Native GNOME InputCapture/EIS verification on 2026-07-30
+
+The proof of concept is feature-gated and intentionally does not replace the
+existing `listen()`/`grab()` API:
+
+```bash
+cargo run --no-default-features --features wayland-portal,x11 \
+  --example wayland_input_capture_detection
+```
+
+It creates a small XWayland window only to give the GNOME portal dialog a
+stable parent. The source capture path remains native Wayland
+InputCapture/EIS; a production desktop application should supply its own
+native Wayland window identifier. Parentless requests were unreliable on this
+GNOME version and logged:
+
+```text
+Failed to associate portal window with parent window
+```
+
+The portal returned one logical zone:
+
+```text
+Region(3840, 2160, 0, 0)
+```
+
+For that zone, GNOME rejected a vertical right barrier at `x=3839` because it
+overlapped the monitor region. The accepted outside barrier is
+`x = x_offset + width = 3840`, with inclusive Y coordinates `0..=2159`.
+This agrees with Deskflow's native logs, where a `1920x1080@2752,0` zone uses
+a right barrier at `x=4672`.
+
+Crossing the accepted barrier produced:
+
+```text
+activation_id=Some(1)
+cursor_position=Some((3840.0, ...))
+barrier_id=Some(Barrier(1))
+```
+
+Three capture runs all released control successfully. The final run observed:
+
+```text
+Relative motion events: 1197
+Keyboard events:        12
+Button events:          6
+Scroll events:          80
+```
+
+The keyboard events included A/B/C press and release with evdev keycodes
+30/48/46. Pointer buttons used evdev codes 272/273. A conventional wheel
+arrived as `ScrollDiscrete` with increments of positive or negative 120, not
+as `ScrollDelta`.
+
+EIS delivered the logical devices as:
+
+```text
+name=Some("captured relative pointer"), type=Virtual
+name=Some("captured keyboard"), type=Virtual
+```
+
+This invalidates the earlier proposed policy of treating only EIS `Physical`
+devices as eligible source input and dropping every `Virtual` device. On this
+GNOME compositor, that policy would drop all real captured keyboard and
+pointer input. Portal source events must remain `InputOrigin::Unknown`; the
+target-side tests below confirm that device type alone cannot provide exact
+self-injection provenance.
+
+An EIS pointer event was observed before the corresponding D-Bus `Activated`
+signal was selected by the client. A production implementation must correlate
+the EIS `DeviceStartEmulating.sequence` with the portal `activation_id`; it
+must not assume cross-transport delivery order.
+
+### Native GNOME RemoteDesktop/EIS and feedback verification on 2026-07-30
+
+The same diagnostic can create a simultaneous RemoteDesktop v2 sender:
+
+```bash
+cargo run --no-default-features --features wayland-portal,x11 \
+  --example wayland_input_capture_detection -- --inject-self-test
+```
+
+GNOME granted keyboard and pointer control and advertised three EIS sender
+devices: an absolute pointer, a relative pointer, and a keyboard. Pointer
+buttons and scrolling were available on the pointer devices. A visible
+relative-motion preflight and `XQueryPointer` coordinate changes verified that
+target-side EIS injection reaches the desktop.
+
+After a physical pointer crossed the InputCapture barrier, the sender injected
+a distinctive sequence. Every injected event was received by the active
+InputCapture session:
+
+```text
+PointerMotion: relative=(37.000, -23.000)
+KeyboardKey: key=30 state=Press
+KeyboardKey: key=30 state=Released
+Button: button=272 state=Press
+Button: button=272 state=Released
+Scroll: discrete=(0, 120)
+```
+
+The diagnostic then performed a same-process disabled/enabled control. While
+InputCapture was disabled, the RemoteDesktop sender placed the absolute
+pointer at `(2520, 719)` and sent relative motion `(120, 0)`. No `Activated`
+signal arrived within two seconds.
+
+After InputCapture was enabled with the same barrier, the identical sequence
+activated the right barrier:
+
+```text
+triggered_by_target_injection=true
+cursor_position=Some((2560.0, 719.0))
+barrier_id=Some(Barrier(1))
+```
+
+After that injected activation, relative motion `(37, -23)` and its inverse,
+evdev key 30 press/release, button 272 press/release, and discrete scroll 120
+all echoed into InputCapture with `DeviceType::Virtual`. An earlier attempt
+observed no post-activation echo, but the controlled repeat disproved that as
+a stable isolation property.
+
+The control directly validates the CrossFlow gate: disabled capture resisted
+target injection; enabled capture self-activated and echoed it. Leaving
+InputCapture armed on every machine is unsafe.
+
 ### Proposed Wayland architecture
 
 Source/capture side:
@@ -934,17 +1172,26 @@ and returns an EIS file descriptor suitable for a libei sender context:
 
 - <https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.RemoteDesktop.html>
 
-For feedback-loop prevention, the safe initial policy is:
+For feedback-loop prevention, do not classify captured EIS devices solely from
+`DeviceType`. GNOME 46 represents captured local keyboard and pointer streams
+as `Virtual`, and a physically activated InputCapture session echoed events
+from a simultaneous RemoteDesktop sender.
 
-```text
-physical receiver device -> eligible local source input
-virtual receiver device  -> do not retransmit
-```
+Use a target-authoritative role/lease invariant instead:
 
-Dropping all virtual devices is stricter than identifying only CrossFlow's own
-virtual device, but it meets the V1 loop-prevention requirement and avoids
-pretending the generic protocol exposes an exact cross-session injector
-credential.
+1. Only the current physical source machine may have InputCapture enabled.
+2. Before a machine accepts an inbound target lease, call
+   `InputCapture.Disable` and confirm source routing is stopped.
+3. While the inbound lease is active, do not publish any local capture stream
+   from that machine, regardless of `DeviceType`.
+4. On target-to-source transition, stop/release inbound emulation first, then
+   set barriers and enable InputCapture under a new epoch.
+5. Drop operations carrying a stale source or target epoch.
+
+The original source remains responsible for the logical cursor while it moves
+across B and C; B does not need to become a source merely because B is the
+current injection target. Local physical takeover on B is a separate, later
+feature and needs an explicit takeover gesture or stronger device evidence.
 
 ### Synergy/Deskflow Wayland evidence
 
@@ -986,8 +1233,8 @@ Do not assume these without testing:
 - whether the installed portal backend implements InputCapture version 2;
 - whether GNOME, KDE, wlroots-based compositors, and nested compositors expose
   identical zone/barrier behavior;
-- whether a RemoteDesktop/libei sender is ever echoed into a simultaneous
-  InputCapture receiver session;
+- whether other compositors reproduce GNOME's physical-activation echo and
+  target-injection barrier activation behavior;
 - whether the receiver exposes enough stable identity to distinguish
   CrossFlow's virtual sender from every other virtual sender;
 - permission persistence and restore-token behavior across login/reboot;
@@ -1010,9 +1257,11 @@ At minimum:
 5. Activate at each configured pointer barrier.
 6. Capture keyboard, relative pointer, button, and wheel events.
 7. Inject the same event kinds on a target session.
-8. Verify virtual events are not retransmitted.
-9. Release capture and restore/suggest cursor placement.
-10. Repeat on at least one GNOME and one KDE native host before claiming broad
+8. Verify an inbound target lease disables InputCapture before injection.
+9. Verify injected target motion cannot activate a disabled source barrier.
+10. Verify no target event is retransmitted even when the compositor echoes it.
+11. Release capture and restore/suggest cursor placement.
+12. Repeat on at least one GNOME and one KDE native host before claiming broad
     Wayland support.
 
 Nested compositor tests may automate protocol behavior, but they do not replace
@@ -1148,6 +1397,12 @@ Gossip. A target-authoritative lease/epoch controls which source may send
 operations. Provenance filtering happens before an event becomes a CrossFlow
 operation.
 
+On Wayland, lease state is also a native capture gate. A machine entering the
+target role must disable its InputCapture session before RemoteDesktop/EIS
+injection starts. This is required even if no captured events are currently
+being forwarded: GNOME target injection can activate an armed barrier. Only
+the active source epoch may enable InputCapture.
+
 ### Minimal data flow
 
 ```text
@@ -1213,8 +1468,10 @@ Recommended sequence:
 1. Linux evdev/uinput privileged E2E for the implemented exact-device identity.
 2. Linux X11 unrelated-client, stress, restart, and autorepeat acceptance.
 3. A capability-reporting design for backend-specific guarantees.
-4. Wayland portal/libei proof of concept on one supported compositor.
-5. Wayland zone/barrier and capture/release integration.
+4. **Done on GNOME 46:** Wayland portal/libei source and target proofs of
+   concept, including echo and injected-barrier activation diagnostics.
+5. Wayland production zone/barrier, role-gating, and capture/release
+   integration.
 6. Native GNOME/KDE compatibility matrix.
 
 Each platform slice should be separately reviewable and must preserve the
@@ -1234,11 +1491,11 @@ The current development host is X11. Recommended sequence:
    lifecycle; do not make CrossFlow depend on generic per-event pass-through.
 5. Verify wheel, autorepeat, held-state transitions, multi-monitor edges,
    emergency release, and disconnect cleanup on native X11.
-6. When a native Wayland host is available, run the read-only portal/libei
-   capability probe below.
-7. Implement InputCapture barriers plus a passive libei receiver on the source
-   side.
-8. Implement RemoteDesktop plus a libei sender on the target side.
+6. **Done on native GNOME 46:** run the portal/libei capability and event probe.
+7. **Proof complete:** InputCapture barriers plus a passive EIS receiver on
+   the source side; production adapter pending.
+8. **Proof complete:** RemoteDesktop plus an EIS sender on the target side;
+   production adapter pending.
 9. Validate GNOME and KDE independently and report unsupported portal backends
    as capabilities, not generic Linux failure.
 10. Harden the evdev/helper fallback only if unsupported compositors or managed

@@ -57,7 +57,7 @@ cargo run --example tui_key_displayer  # ratatui TUI, keys/mouse live view
 Two independent, mutually-exclusive backends; `x11` is the default.
 
 ```bash
-# X11 (default) — XRecord listen, XI2 active grab, XTest simulate/pass-through.
+# X11 (default) — XRecord listen, XI2 active grab, XTest simulate/replay.
 # Does not work on Wayland and needs no input-group/uinput permission.
 cargo build --features x11
 
@@ -152,7 +152,9 @@ an embedding application.
 
 **Linux**: X11 uses XRecord for absolute-only listening, active
 `XGrabKeyboard`/`XGrabPointer` sessions plus XI2 RawMotion for `grab()`, and
-XTest for absolute/relative simulation and pass-through (default, X11-only).
+XTest for absolute/relative simulation and key/motion replay (default,
+X11-only). Pointer buttons use synchronous `SyncPointer`/`ReplayPointer`
+pass-through so the receiving application owns the complete local gesture.
 Grab motion keeps absolute `MouseData::x/y` and adds raw deltas in
 `MouseData::relative`; `listen()` leaves `relative` as `None`. A passed pointer
 press yields the complete local pointer gesture until the receiving

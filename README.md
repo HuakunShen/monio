@@ -60,6 +60,9 @@ monio = { version = "0.2", features = ["tokio", "recorder", "statistics"] }
 
 # Linux: evdev support (works on X11 AND Wayland)
 monio = { version = "0.2", features = ["evdev"], default-features = false }
+
+# Linux: Wayland portal/libei proof-of-concept dependencies
+monio = { version = "0.2", features = ["wayland-portal"], default-features = false }
 ```
 
 Linux X11 builds require the X11, Xi, and Xtst development packages:
@@ -149,8 +152,8 @@ fn main() {
 | ------------- | ------------ | --------------------------------------------------- |
 | macOS         | ✅ Full      | Via CGEventTap                                      |
 | Windows       | ✅ Full      | Via low-level hooks                                 |
-| Linux/X11     | ✅ Active    | XGrab + XI2 RawMotion with XTest pass-through       |
-| Linux/Wayland | ⚠️ Limited   | See [Wayland Limitation](#wayland-limitation) below |
+| Linux/X11     | ✅ Active    | XGrab + XI2 RawMotion and gesture replay            |
+| Linux/Wayland | ✅ evdev     | Privileged device access; compositor compatibility varies |
 
 On Windows, ordinary `listen()` keeps reporting absolute motion with
 `mouse.relative == None`. During `grab()`, Monio combines
@@ -185,7 +188,7 @@ On Linux/X11, ordinary `listen()` keeps reporting absolute motion.
 `grab()` requires XI2 2.1+ and attaches raw relative deltas to
 `mouse.relative`. Those deltas come from XI2 raw motion rather than being
 derived from cursor coordinates that may be clipped at a screen edge. Native
-edge behavior still needs verification on each supported X11 environment:
+edge behavior passed on GNOME X11; validate other X11 environments separately:
 
 ```rust
 use monio::{Event, EventType, grab};
@@ -473,9 +476,11 @@ Two backends are available:
 
 **X11 (default)**: Uses XRecord for listen-only capture, active
 `XGrabKeyboard`/`XGrabPointer` sessions plus XI2 RawMotion for `grab()`, and
-XTest for simulation and grab pass-through. It works only on X11 and requires
-no `input` group or `/dev/uinput` access. `grab()` fails explicitly if the X
-server does not support XI2 2.1 or newer.
+XTest for simulation and key/motion replay. Pointer-button pass-through uses
+X11's synchronous grab plus `ReplayPointer`, so the receiving application owns
+the complete gesture. It works only on X11 and requires no `input` group or
+`/dev/uinput` access. `grab()` fails explicitly if the X server does not
+support XI2 2.1 or newer.
 
 `MouseData::x/y` remain absolute screen coordinates. In X11 grab mode,
 `MouseData::relative` contains raw `delta_x/delta_y`; in ordinary XRecord
@@ -509,26 +514,60 @@ sudo udevadm trigger --name-match=uinput
 # Log out and back in for changes to take effect
 ```
 
-#### Wayland Limitation
+#### Wayland evdev compatibility
 
 On **Wayland**, `grab()` pass-through behavior depends on the compositor and
 libinput environment:
 
-- ✅ **Blocking events works**: Events you choose to consume (return `None`) are properly blocked
-- ⚠️ **Pass-through may fail**: Events you return as `Some(event)` may not reach other applications
+- **Blocking** uses the kernel's exclusive evdev grab and prevents consumed
+  events from reaching the compositor.
+- **Pass-through** re-injects allowed events through Monio's uinput device.
+  Whether the compositor accepts that virtual device must be validated on the
+  target desktop.
 
-**Why this happens:**
 When Monio grabs an evdev device, it intercepts events before the compositor's
 input stack sees them. Pass-through requires re-injection through a uinput
 virtual device, and compositor policy for those events varies.
 
-**Workarounds:**
-
-- Use **X11** for unprivileged active-grab support
-- Use grab only for **consuming/blocking** events, not for selective pass-through
-- For global hotkeys on Wayland, consider using your compositor's native hotkey system
+Native testing on GNOME 46 with libinput 1.25 verified selective keyboard
+blocking plus keyboard, pointer-click, pointer-motion, and drag pass-through.
+This result disproves the earlier claim that pass-through failure is a
+fundamental Wayland limitation, but it is not a guarantee for every compositor.
 
 Validate pass-through on the target compositor before relying on it.
+
+#### Wayland portal proof of concept
+
+The optional `wayland-portal` feature supplies the pure-Rust `ashpd` and `reis`
+dependencies used by the native InputCapture diagnostic. It does not yet
+replace `listen()` or `grab()` with a production portal backend.
+
+On GNOME 46, the diagnostic has natively verified permission, zones, a
+right-edge pointer barrier, relative pointer motion, keyboard, buttons,
+discrete wheel events, capture release, and target-side RemoteDesktop/EIS
+injection:
+
+```bash
+cargo run --no-default-features --features wayland-portal,x11 \
+  --example wayland_input_capture_detection
+
+# Also test target injection, feedback, and injected barrier activation
+cargo run --no-default-features --features wayland-portal,x11 \
+  --example wayland_input_capture_detection -- --inject-self-test
+```
+
+The diagnostic uses a small XWayland window only to give the portal permission
+dialog a stable parent. A desktop application should pass its own native
+Wayland window identifier. Input transport remains native InputCapture/EIS.
+
+GNOME 46 target injection can activate an armed InputCapture barrier, and a
+physically activated capture session can echo injected keyboard and pointer
+events. A CrossFlow target must therefore disable its own InputCapture session
+before accepting an inbound control lease. Do not infer physical provenance
+from the EIS device type: GNOME reports captured local input as `Virtual`.
+The diagnostic's disabled/enabled control verified that the same injected
+edge crossing does not activate a disabled session and does activate an
+enabled one.
 
 ## Examples
 
@@ -550,6 +589,10 @@ cargo run --example grab
 
 # X11 relative grab diagnostic (temporarily grabs input for at most 10 seconds)
 cargo run --features x11 --example x11_relative_grab_detection
+
+# Wayland InputCapture/EIS diagnostic (permission prompt, right-edge barrier)
+cargo run --no-default-features --features wayland-portal,x11 \
+  --example wayland_input_capture_detection
 
 # Display information
 cargo run --example display

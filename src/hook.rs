@@ -36,7 +36,8 @@ where
 ///
 /// - **macOS**: Full support via CGEventTap
 /// - **Windows**: Full support via low-level hooks
-/// - **Linux/X11**: Active keyboard/pointer grabs with XTest pass-through
+/// - **Linux/X11**: Active grabs with XTest key/motion replay and native
+///   pointer-gesture replay
 /// - **Linux/evdev**: Exclusive device grabs with uinput pass-through
 ///
 /// On X11, passing a pointer press yields the complete pointer gesture to the
@@ -149,7 +150,8 @@ impl Hook {
     ///
     /// - **macOS**: Full support
     /// - **Windows**: Full support
-    /// - **Linux/X11**: Active grabs with XTest pass-through
+    /// - **Linux/X11**: Active grabs with XTest key/motion replay and native
+    ///   pointer-gesture replay
     /// - **Linux/evdev**: Exclusive device grabs with uinput pass-through
     pub fn grab<H: GrabHandler + 'static>(&self, handler: H) -> Result<()> {
         if self.running.swap(true, Ordering::SeqCst) {
@@ -262,7 +264,8 @@ where
 ///
 /// - **macOS**: Full support via CGEventTap
 /// - **Windows**: Full support via low-level hooks
-/// - **Linux/X11**: Active keyboard/pointer grabs with XTest pass-through
+/// - **Linux/X11**: Active grabs with XTest key/motion replay and native
+///   pointer-gesture replay
 /// - **Linux/evdev**: Exclusive device grabs with uinput pass-through
 ///
 /// # Example

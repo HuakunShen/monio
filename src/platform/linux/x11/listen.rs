@@ -474,6 +474,7 @@ impl ActiveGrabs {
             };
             grabs.grab_keyboard()?;
             grabs.grab_pointer()?;
+            grabs.arm_pointer_buttons();
             Ok(grabs)
         }
     }
@@ -503,7 +504,7 @@ impl ActiveGrabs {
                 self.window,
                 xlib::False,
                 POINTER_EVENT_MASK,
-                xlib::GrabModeAsync,
+                xlib::GrabModeSync,
                 xlib::GrabModeAsync,
                 0,
                 0,
@@ -515,6 +516,13 @@ impl ActiveGrabs {
         }
         self.pointer_grabbed = true;
         Ok(())
+    }
+
+    fn arm_pointer_buttons(&self) {
+        unsafe {
+            xlib::XAllowEvents(self.display, xlib::SyncPointer, xlib::CurrentTime);
+            xlib::XSync(self.display, FALSE);
+        }
     }
 
     fn replay_key(&mut self, keycode: u32, pressed: bool) -> Result<()> {
@@ -529,31 +537,13 @@ impl ActiveGrabs {
         replay_result
     }
 
-    fn replay_button(&mut self, button: u32, pressed: bool) -> Result<()> {
-        unsafe {
-            xlib::XUngrabPointer(self.display, xlib::CurrentTime);
-            xlib::XSync(self.display, FALSE);
-        }
-        self.pointer_grabbed = false;
-
-        let replay_result = simulate::replay_button(button, pressed);
-        self.grab_pointer()?;
-        replay_result
-    }
-
-    fn begin_pointer_passthrough(&mut self, button: u32) -> Result<()> {
+    fn begin_pointer_passthrough(&mut self) -> Result<()> {
         self.suspend_raw_motion()?;
         unsafe {
-            xlib::XUngrabPointer(self.display, xlib::CurrentTime);
+            xlib::XAllowEvents(self.display, xlib::ReplayPointer, xlib::CurrentTime);
             xlib::XSync(self.display, FALSE);
         }
         self.pointer_grabbed = false;
-
-        if let Err(error) = simulate::replay_button(button, true) {
-            self.grab_pointer()?;
-            self.resume_raw_motion()?;
-            return Err(error);
-        }
         Ok(())
     }
 
@@ -587,7 +577,7 @@ impl ActiveGrabs {
                 self.window,
                 xlib::False,
                 POINTER_EVENT_MASK,
-                xlib::GrabModeAsync,
+                xlib::GrabModeSync,
                 xlib::GrabModeAsync,
                 0,
                 0,
@@ -600,6 +590,7 @@ impl ActiveGrabs {
                 self.pointer_grabbed = true;
                 self.sync_pointer_button_state();
                 self.resume_raw_motion()?;
+                self.arm_pointer_buttons();
                 Ok(true)
             }
             xlib::AlreadyGrabbed | xlib::GrabFrozen => Ok(false),
@@ -645,6 +636,7 @@ impl ActiveGrabs {
         let replay_result = simulate::replay_motion(x, y);
         self.grab_pointer()?;
         self.resume_raw_motion()?;
+        self.arm_pointer_buttons();
         replay_result
     }
 
@@ -752,7 +744,6 @@ fn handle_grab_event<H: GrabHandler>(
     grabs: &mut ActiveGrabs,
     handler: &H,
     event: &xlib::XEvent,
-    replay_wheel_release: &mut [bool; 4],
 ) -> Result<()> {
     let type_ = event.get_type();
 
@@ -775,10 +766,7 @@ fn handle_grab_event<H: GrabHandler>(
                 let code = button.button;
 
                 if type_ == xlib::ButtonRelease && (4..=7).contains(&code) {
-                    let replay = std::mem::take(&mut replay_wheel_release[(code - 4) as usize]);
-                    if replay {
-                        grabs.replay_button(code, false)?;
-                    }
+                    grabs.arm_pointer_buttons();
                     return Ok(());
                 }
 
@@ -789,15 +777,10 @@ fn handle_grab_event<H: GrabHandler>(
                     button.y_root as f64,
                 ) {
                     let replay = handler.handle_event(&event).is_some();
-                    if type_ == xlib::ButtonPress && (4..=7).contains(&code) {
-                        replay_wheel_release[(code - 4) as usize] = replay;
-                    }
                     if replay {
-                        if type_ == xlib::ButtonPress {
-                            grabs.begin_pointer_passthrough(code)?;
-                        } else {
-                            grabs.replay_button(code, false)?;
-                        }
+                        grabs.begin_pointer_passthrough()?;
+                    } else {
+                        grabs.arm_pointer_buttons();
                     }
                 }
             }
@@ -814,10 +797,11 @@ fn handle_grab_event<H: GrabHandler>(
 
 /// Run the event hook with active X11 keyboard and pointer grabs (blocking).
 ///
-/// Returning `None` consumes an event. Returning `Some(event)` replays the raw
-/// X11 event with XTest. A passed pointer press yields the complete local
-/// pointer gesture because X11 gives the receiving application an implicit
-/// pointer grab; Monio reacquires the pointer when that gesture ends.
+/// Returning `None` consumes an event. Returning `Some(event)` replays keys and
+/// standalone motion with XTest. Pointer-button events use `ReplayPointer`; a
+/// passed press therefore yields the complete local pointer gesture because
+/// X11 gives the receiving application an implicit pointer grab. Monio
+/// reacquires the pointer when that gesture ends.
 pub fn run_grab_hook<H: GrabHandler + 'static>(
     running: &Arc<AtomicBool>,
     handler: H,
@@ -832,7 +816,6 @@ pub fn run_grab_hook<H: GrabHandler + 'static>(
     let result = (|| {
         let mut grabs = ActiveGrabs::acquire()?;
         handler.handle_event(&Event::hook_enabled());
-        let mut replay_wheel_release = [false; 4];
 
         let loop_result = (|| {
             while running.load(Ordering::SeqCst) {
@@ -856,16 +839,10 @@ pub fn run_grab_hook<H: GrabHandler + 'static>(
                         xlib::ButtonPress | xlib::ButtonRelease | xlib::MotionNotify
                     )
                 {
-                    if event.get_type() == xlib::ButtonRelease {
-                        let code = unsafe { event.button.button };
-                        if (4..=7).contains(&code) {
-                            replay_wheel_release[(code - 4) as usize] = false;
-                        }
-                    }
                     grabs.replay_ungrabbed_pointer_event(&event)?;
                     continue;
                 }
-                handle_grab_event(&mut grabs, &handler, &event, &mut replay_wheel_release)?;
+                handle_grab_event(&mut grabs, &handler, &event)?;
             }
             Ok(())
         })();

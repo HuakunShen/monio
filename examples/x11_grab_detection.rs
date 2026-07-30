@@ -242,7 +242,7 @@ mod linux {
             }
         }
 
-        fn collect_events(&self) -> Vec<(i32, u32)> {
+        fn collect_events(&self) -> Vec<(i32, u32, u32)> {
             let deadline = Instant::now() + OBSERVATION_TIMEOUT;
             let mut events = Vec::new();
 
@@ -253,11 +253,11 @@ mod linux {
                         xlib::XNextEvent(self.display, &mut event);
                         let type_ = event.get_type();
                         if type_ == xlib::KeyPress || type_ == xlib::KeyRelease {
-                            events.push((type_, event.key.keycode));
+                            events.push((type_, event.key.keycode, event.key.state));
                         } else if type_ == xlib::ButtonPress || type_ == xlib::ButtonRelease {
-                            events.push((type_, event.button.button));
+                            events.push((type_, event.button.button, event.button.state));
                         } else if type_ == xlib::MotionNotify {
-                            events.push((type_, 0));
+                            events.push((type_, 0, event.motion.state));
                         }
                     }
                 }
@@ -313,6 +313,24 @@ mod linux {
         Ok(())
     }
 
+    fn emit_button_drag(button: Button) -> monio::Result<()> {
+        mouse_press(button)?;
+        sleep(Duration::from_millis(50));
+        if let Err(error) = mouse_move(
+            (OBSERVER_POINTER_X + 12) as f64,
+            (OBSERVER_POINTER_Y + 12) as f64,
+        ) {
+            let _ = mouse_release(button);
+            return Err(error);
+        }
+        sleep(Duration::from_millis(50));
+        if let Err(error) = mouse_release(button) {
+            let _ = mouse_release(button);
+            return Err(error);
+        }
+        Ok(())
+    }
+
     pub fn run() -> Result<(), Box<dyn Error>> {
         println!("monio X11 grab diagnostic");
         println!("=========================\n");
@@ -327,7 +345,7 @@ mod linux {
         let preflight = observer.collect_events();
         let preflight_w = preflight
             .iter()
-            .filter(|(_, keycode)| *keycode == w_keycode)
+            .filter(|(_, keycode, _)| *keycode == w_keycode)
             .count();
         if preflight_w != 2 {
             return Err(io::Error::other(format!(
@@ -457,7 +475,7 @@ mod linux {
         emit_key_pair(Key::KeyQ)?;
         emit_key_pair(Key::KeyW)?;
         emit_button_pair(Button::Left)?;
-        emit_button_pair(Button::Right)?;
+        emit_button_drag(Button::Right)?;
         sleep(Duration::from_millis(20));
         mouse_move(40.0, 40.0)?;
 
@@ -479,11 +497,11 @@ mod linux {
         let handled_w = handled.iter().filter(|(_, key)| *key == Key::KeyW).count();
         let observed_q = observed
             .iter()
-            .filter(|(_, keycode)| *keycode == q_keycode)
+            .filter(|(_, keycode, _)| *keycode == q_keycode)
             .count();
         let observed_w = observed
             .iter()
-            .filter(|(_, keycode)| *keycode == w_keycode)
+            .filter(|(_, keycode, _)| *keycode == w_keycode)
             .count();
         let handled_buttons = handled_buttons
             .lock()
@@ -498,13 +516,13 @@ mod linux {
             .count();
         let observed_left = observed
             .iter()
-            .filter(|(type_, button)| {
+            .filter(|(type_, button, _)| {
                 matches!(*type_, xlib::ButtonPress | xlib::ButtonRelease) && *button == 1
             })
             .count();
         let observed_right = observed
             .iter()
-            .filter(|(type_, button)| {
+            .filter(|(type_, button, _)| {
                 matches!(*type_, xlib::ButtonPress | xlib::ButtonRelease) && *button == 3
             })
             .count();
@@ -513,7 +531,13 @@ mod linux {
             .map_err(|_| io::Error::other("handled-motion mutex poisoned"))?;
         let observed_motion = observed
             .iter()
-            .filter(|(type_, _)| *type_ == xlib::MotionNotify)
+            .filter(|(type_, _, _)| *type_ == xlib::MotionNotify)
+            .count();
+        let observed_right_drag = observed
+            .iter()
+            .filter(|(type_, _, mask)| {
+                *type_ == xlib::MotionNotify && *mask & xlib::Button3Mask != 0
+            })
             .count();
 
         println!("Handler received Q press/release: {handled_q}/2");
@@ -524,8 +548,12 @@ mod linux {
         println!("Observer received blocked left events: {observed_left}/0");
         println!("Handler began passed right gesture: {handled_right}/>=1");
         println!("Observer received passed right gesture: {observed_right}/2");
+        println!("Observer received passed right drag motion: {observed_right_drag}/>=1");
         println!("Handler received pointer motion: {handled_motion}/>=1");
-        println!("Observer received blocked pointer motion: {observed_motion}/0");
+        println!(
+            "Observer received pointer motion: {observed_motion} \
+             (passed drag only; standalone motion remains blocked)"
+        );
         println!("Stop cleanup released keyboard and pointer grabs: YES");
 
         if handled_q != 2
@@ -554,10 +582,17 @@ mod linux {
                 io::Error::other("passed right-button gesture was not delivered intact").into(),
             );
         }
-        if observed_motion != 0 {
-            return Err(
-                io::Error::other("consumed pointer motion reached another X11 client").into(),
-            );
+        if observed_right_drag == 0 {
+            return Err(io::Error::other(
+                "passed right-button gesture did not deliver drag motion with the button held",
+            )
+            .into());
+        }
+        if observed_motion != observed_right_drag {
+            return Err(io::Error::other(
+                "standalone consumed pointer motion reached another X11 client",
+            )
+            .into());
         }
 
         println!("\nSelective X11 grab verified.");

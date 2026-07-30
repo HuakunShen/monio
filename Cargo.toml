@@ -13,7 +13,8 @@ thiserror = "2"
 log = "0.4"
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
-tokio = { version = "1", features = ["sync"], optional = true }
+tokio = { version = "1", features = ["sync", "rt", "macros", "net", "time"], optional = true }
+futures-util = { version = "0.3", optional = true }
 
 [dev-dependencies]
 ratatui = "0.30"
@@ -44,11 +45,14 @@ windows = { version = "0.59", features = [
 x11 = { version = "2.21", features = ["xlib", "xrecord", "xinput", "xtst"], optional = true }
 evdev = { version = "0.12", optional = true }
 libc = { version = "0.2", optional = true }
+ashpd = { version = "0.13.13", default-features = false, features = ["input_capture", "remote_desktop", "screencast", "tokio"], optional = true }
+reis = { version = "0.7.1", default-features = false, features = ["tokio"], optional = true }
 
 [features]
 default = ["x11"]
 x11 = ["dep:x11"]
 evdev = ["dep:evdev", "dep:libc"]
+wayland-portal = ["dep:ashpd", "dep:futures-util", "dep:libc", "dep:reis", "dep:tokio"]
 tokio = ["dep:tokio"]
 recorder = ["dep:serde", "dep:serde_json"]
 statistics = []
@@ -94,6 +98,11 @@ required-features = ["x11"]
 [[example]]
 name = "windows_relative_grab_detection"
 path = "examples/windows_relative_grab_detection.rs"
+
+[[example]]
+name = "wayland_input_capture_detection"
+path = "examples/wayland_input_capture_detection.rs"
+required-features = ["wayland-portal", "x11"]
 
 [[example]]
 name = "channel_sync"
