@@ -340,7 +340,14 @@ carries a random process-session tag. macOS stores it in
 `CGEventField::EventSourceUserData` and also validates
 `CGEventField::EventSourceUnixProcessID`. Windows stores a 32-bit tag in
 `KEYBDINPUT::dwExtraInfo` or `MOUSEINPUT::dwExtraInfo` and accepts it only when
-the low-level hook also reports `LLKHF_INJECTED` or `LLMHF_INJECTED`:
+the low-level hook also reports `LLKHF_INJECTED` or `LLMHF_INJECTED`.
+
+The Linux evdev backend creates one process-scoped uinput device before
+capture enumeration and retains the exact character-device number of its
+`/dev/input/event*` node. Listen mode classifies events from that live device
+as `ThisMonioSession`; grab mode excludes the device to prevent pass-through
+events from feeding back into the grab loop. Device names are not used as
+identity:
 
 ```rust
 use monio::Event;
@@ -360,11 +367,16 @@ This is a non-authenticating feedback-loop marker for Monio's own injected
 input, not a security or authorization boundary. It does not prove that an
 untagged event is physical: another program may synthesize an untagged event,
 and privileged, Accessibility-authorized, or suitably positioned software may
-be able to imitate source metadata. Linux currently reports
-`InputOrigin::Unknown` until its native backends preserve equivalent evidence.
+be able to imitate source metadata. Other Linux devices remain `Unknown`. The
+X11 backend instead keeps one process-scoped XTest client and has XRecord
+correlate that client's `XTestFakeInput` requests with the resulting device
+events in server order. It can therefore classify Monio's own XTest key,
+button, wheel, and pointer events without access to `/dev/input` or
+`/dev/uinput`. Requests from other X11 clients and unmatched events remain
+`Unknown`.
 
-Run the native macOS or Windows diagnostic. macOS requires Accessibility
-permission:
+Run the native macOS, Windows, or Linux/X11 diagnostic. macOS requires
+Accessibility permission:
 
 ```bash
 cargo run --example synthetic_input_detection
@@ -373,9 +385,8 @@ cargo run --example synthetic_input_detection
 The command exits unsuccessfully unless the synthesized keyboard and mouse
 events are all observed as `Injected { injector: ThisMonioSession }`.
 
-For the verified macOS implementation, current Windows/Linux source audit,
-unresolved hypotheses, native experiment requirements, and copy-paste prompts
-for continuing on another machine, see
+For the platform mechanisms, current verification status, unresolved
+hypotheses, and native experiment requirements, see
 [`docs/input-provenance-cross-platform-handoff.md`](docs/input-provenance-cross-platform-handoff.md).
 
 ## Platform Notes
@@ -401,22 +412,30 @@ Two backends are available:
 cargo build --features evdev --no-default-features
 ```
 
-**evdev permissions**: Requires membership in the `input` group:
+**evdev permissions**: Requires membership in the `input` group and access to
+`/dev/uinput`. The injector is created before capture so its exact identity is
+available for provenance classification:
 
 ```bash
 sudo usermod -aG input $USER
+echo 'KERNEL=="uinput", GROUP="input", MODE="0660"' | sudo tee /etc/udev/rules.d/99-uinput.rules
+sudo udevadm control --reload-rules
+sudo udevadm trigger --name-match=uinput
 # Log out and back in for changes to take effect
 ```
 
 #### Wayland Limitation
 
-On **Wayland**, the `grab()` function has a fundamental limitation due to how Wayland compositors handle input:
+On **Wayland**, `grab()` pass-through behavior depends on the compositor and
+libinput environment:
 
 - ✅ **Blocking events works**: Events you choose to consume (return `None`) are properly blocked
-- ❌ **Pass-through events fail**: Events you want to pass through (return `Some(event)`) may not reach other applications
+- ⚠️ **Pass-through may fail**: Events you return as `Some(event)` may not reach other applications
 
 **Why this happens:**
-Wayland compositors use **libinput**, which takes exclusive access to physical input devices. When we grab via evdev, we intercept events before libinput sees them. When we re-inject events via uinput (virtual device), libinput typically ignores them for security reasons.
+When Monio grabs an evdev device, it intercepts events before the compositor's
+input stack sees them. Pass-through requires re-injection through a uinput
+virtual device, and compositor policy for those events varies.
 
 **Workarounds:**
 
@@ -424,7 +443,7 @@ Wayland compositors use **libinput**, which takes exclusive access to physical i
 - Use grab only for **consuming/blocking** events, not for selective pass-through
 - For global hotkeys on Wayland, consider using your compositor's native hotkey system
 
-This limitation affects all input libraries using evdev+uinput on Wayland, not just monio.
+Validate pass-through on the target compositor before relying on it.
 
 ## Examples
 
@@ -438,7 +457,7 @@ cargo run --example drag_detection
 # Event simulation
 cargo run --example simulate
 
-# macOS/Windows self-injection provenance
+# macOS/Windows/Linux X11 self-injection provenance
 cargo run --example synthetic_input_detection
 
 # Event grabbing (block specific keys)

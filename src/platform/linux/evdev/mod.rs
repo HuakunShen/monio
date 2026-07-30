@@ -17,15 +17,15 @@
 //!
 //! ## Wayland Grab Limitation
 //!
-//! On **Wayland**, `run_grab_hook` (grab mode) has a known limitation:
+//! On **Wayland**, `run_grab_hook` pass-through behavior depends on the
+//! compositor and libinput environment:
 //!
 //! - ✅ Events you **consume** (return `None` from handler) are properly blocked
-//! - ❌ Events you **pass through** (return `Some(event)`) may not reach applications
+//! - ⚠️ Events you **pass through** (return `Some(event)`) may not reach applications
 //!
-//! This happens because Wayland compositors use libinput which ignores events
-//! from virtual devices (uinput) for security. When we grab the physical devices
-//! via evdev, libinput loses access to them, and our re-injected events are
-//! not recognized by the compositor.
+//! Grabbing intercepts events before the compositor sees them. Pass-through
+//! requires re-injection through a uinput virtual device, and compositor policy
+//! for those events varies.
 //!
 //! For selective event filtering on Wayland, consider using your compositor's
 //! native hotkey/configuration system instead of this library.
@@ -34,6 +34,7 @@
 
 mod display;
 mod listen;
+mod provenance;
 mod simulate;
 
 pub use display::{display_at_point, displays, primary_display, system_settings};

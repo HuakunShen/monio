@@ -6,16 +6,16 @@
 #![allow(dead_code)]
 
 use crate::error::{Error, Result};
-use crate::event::{Button, Event, ScrollDirection};
+use crate::event::{Button, Event, InputOrigin, ScrollDirection};
 use crate::hook::{EventHandler, GrabHandler};
-use crate::platform::linux::evdev::simulate::emit_event;
+use crate::platform::linux::evdev::provenance::InjectorDeviceIdentity;
+use crate::platform::linux::evdev::simulate::{emit_event, initialize};
 use crate::platform::linux::keycodes::evdev_keycode_to_key;
 use crate::state::{
     self, MASK_ALT, MASK_BUTTON1, MASK_BUTTON2, MASK_BUTTON3, MASK_BUTTON4, MASK_BUTTON5,
     MASK_CTRL, MASK_META, MASK_SHIFT,
 };
 use evdev::{Device, EventType as EvdevEventType, InputEventKind};
-use std::collections::HashMap;
 use std::fs;
 use std::os::unix::io::AsRawFd;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -68,9 +68,18 @@ fn code_to_mask(code: u16) -> u32 {
     }
 }
 
-/// Enumerate all input devices
-fn enumerate_devices() -> Result<Vec<Device>> {
+struct CapturedDevice {
+    device: Device,
+    origin: InputOrigin,
+}
+
+/// Enumerate all input devices while retaining exact injector identity.
+fn enumerate_devices(
+    injector: &InjectorDeviceIdentity,
+    include_session_injector: bool,
+) -> Result<Vec<CapturedDevice>> {
     let mut devices = Vec::new();
+    let mut found_session_injector = false;
 
     let dir = fs::read_dir("/dev/input").map_err(|e| {
         Error::PermissionDenied(format!(
@@ -86,12 +95,26 @@ fn enumerate_devices() -> Result<Vec<Device>> {
             if name.starts_with("event") {
                 match Device::open(&path) {
                     Ok(device) => {
+                        let origin =
+                            injector.event_origin(device.as_raw_fd()).map_err(|error| {
+                                Error::Platform(format!(
+                                    "Failed to inspect input device {}: {}",
+                                    path.display(),
+                                    error
+                                ))
+                            })?;
+                        let is_session_injector = origin != InputOrigin::Unknown;
+                        if is_session_injector && !include_session_injector {
+                            continue;
+                        }
+
                         // Only include devices that have key or relative events
                         let supported = device.supported_events();
                         if supported.contains(EvdevEventType::KEY)
                             || supported.contains(EvdevEventType::RELATIVE)
                         {
-                            devices.push(device);
+                            found_session_injector |= is_session_injector;
+                            devices.push(CapturedDevice { device, origin });
                         }
                     }
                     Err(e) => {
@@ -100,6 +123,14 @@ fn enumerate_devices() -> Result<Vec<Device>> {
                 }
             }
         }
+    }
+
+    if include_session_injector && !found_session_injector {
+        return Err(Error::PermissionDenied(
+            "Monio created its uinput injector, but its /dev/input/event* node could not be \
+             opened. Make sure the current user can read input devices."
+                .into(),
+        ));
     }
 
     if devices.is_empty() {
@@ -138,6 +169,8 @@ impl<H: GrabHandler> GrabHandlerWrapper<H> {
 
 /// Run the event hook (blocking).
 pub fn run_hook<H: EventHandler + 'static>(running: &Arc<AtomicBool>, handler: H) -> Result<()> {
+    let injector = initialize()?;
+
     // Store stop flag
     {
         let mut s = STOP_FLAG
@@ -147,7 +180,7 @@ pub fn run_hook<H: EventHandler + 'static>(running: &Arc<AtomicBool>, handler: H
     }
 
     let wrapper = ListenHandler { handler };
-    run_event_loop(running, |event| {
+    run_event_loop(running, &injector, |event| {
         wrapper.handle(event);
         true // Always pass through in listen mode
     })?;
@@ -168,6 +201,8 @@ pub fn run_grab_hook<H: GrabHandler + 'static>(
     running: &Arc<AtomicBool>,
     handler: H,
 ) -> Result<()> {
+    let injector = initialize()?;
+
     // Store stop flag
     {
         let mut s = STOP_FLAG
@@ -179,17 +214,17 @@ pub fn run_grab_hook<H: GrabHandler + 'static>(
     let wrapper = GrabHandlerWrapper { handler };
 
     // For grab mode, we need to grab the devices
-    let devices = enumerate_devices()?;
+    let devices = enumerate_devices(&injector, false)?;
     let mut grabbed_devices = Vec::new();
 
-    for mut device in devices {
+    for mut captured in devices {
         // Try to grab the device (exclusive access)
-        if device.grab().is_ok() {
-            grabbed_devices.push(device);
+        if captured.device.grab().is_ok() {
+            grabbed_devices.push(captured);
         } else {
             log::warn!(
                 "Failed to grab device: {}",
-                device.name().unwrap_or("unknown")
+                captured.device.name().unwrap_or("unknown")
             );
         }
     }
@@ -210,8 +245,8 @@ pub fn run_grab_hook<H: GrabHandler + 'static>(
     let _ = wrapper.handle(&Event::hook_disabled());
 
     // Ungrab devices
-    for mut device in grabbed_devices {
-        let _ = device.ungrab();
+    for mut captured in grabbed_devices {
+        let _ = captured.device.ungrab();
     }
 
     // Cleanup
@@ -226,11 +261,15 @@ pub fn run_grab_hook<H: GrabHandler + 'static>(
 }
 
 /// Main event loop for listen mode (non-grabbing)
-fn run_event_loop<F>(running: &Arc<AtomicBool>, mut callback: F) -> Result<()>
+fn run_event_loop<F>(
+    running: &Arc<AtomicBool>,
+    injector: &InjectorDeviceIdentity,
+    mut callback: F,
+) -> Result<()>
 where
     F: FnMut(&Event) -> bool,
 {
-    let devices = enumerate_devices()?;
+    let mut devices = enumerate_devices(injector, true)?;
 
     // Send hook enabled event
     callback(&Event::hook_enabled());
@@ -239,15 +278,11 @@ where
     let mut poll_fds: Vec<libc::pollfd> = devices
         .iter()
         .map(|d| libc::pollfd {
-            fd: d.as_raw_fd(),
+            fd: d.device.as_raw_fd(),
             events: libc::POLLIN,
             revents: 0,
         })
         .collect();
-
-    // Store devices in a map for easy lookup
-    let mut device_map: HashMap<i32, Device> =
-        devices.into_iter().map(|d| (d.as_raw_fd(), d)).collect();
 
     while running.load(Ordering::SeqCst) {
         // Poll with timeout
@@ -266,21 +301,16 @@ where
             continue;
         }
 
-        // Process events from devices with data
-        for pfd in &poll_fds {
-            if pfd.revents & libc::POLLIN != 0 && device_map.contains_key(&pfd.fd) {
-                // Note: We can't easily mutate device here due to HashMap
-                // In a real implementation, we'd use interior mutability
-                // For now, we'll use a simpler approach
-            }
-        }
-
-        // Simplified approach: iterate and fetch events
-        for device in device_map.values_mut() {
-            if let Ok(events) = device.fetch_events() {
-                for ev in events {
-                    if let Some(event) = convert_event(&ev) {
-                        callback(&event);
+        for (i, pfd) in poll_fds.iter().enumerate() {
+            if pfd.revents & libc::POLLIN != 0
+                && let Some(captured) = devices.get_mut(i)
+            {
+                let origin = captured.origin;
+                if let Ok(events) = captured.device.fetch_events() {
+                    for ev in events {
+                        if let Some(event) = convert_event(&ev, origin) {
+                            callback(&event);
+                        }
                     }
                 }
             }
@@ -296,7 +326,7 @@ where
 /// Event loop for grab mode (with device grabbing)
 fn run_grabbed_event_loop<F>(
     running: &Arc<AtomicBool>,
-    devices: &mut [Device],
+    devices: &mut [CapturedDevice],
     mut callback: F,
 ) -> Result<()>
 where
@@ -306,7 +336,7 @@ where
     let mut poll_fds: Vec<libc::pollfd> = devices
         .iter()
         .map(|d| libc::pollfd {
-            fd: d.as_raw_fd(),
+            fd: d.device.as_raw_fd(),
             events: libc::POLLIN,
             revents: 0,
         })
@@ -331,21 +361,23 @@ where
         // Process events
         for (i, pfd) in poll_fds.iter().enumerate() {
             if pfd.revents & libc::POLLIN != 0
-                && let Some(device) = devices.get_mut(i)
-                && let Ok(events) = device.fetch_events()
+                && let Some(captured) = devices.get_mut(i)
             {
-                for ev in events {
-                    let pass_through = if let Some(event) = convert_event(&ev) {
-                        callback(&event)
-                    } else {
-                        // Unknown event type - pass through
-                        true
-                    };
+                let origin = captured.origin;
+                if let Ok(events) = captured.device.fetch_events() {
+                    for ev in events {
+                        let pass_through = if let Some(event) = convert_event(&ev, origin) {
+                            callback(&event)
+                        } else {
+                            // Unknown event type - pass through
+                            true
+                        };
 
-                    if pass_through {
-                        // Re-inject the original event via uinput
-                        if let Err(e) = emit_event(&ev) {
-                            log::debug!("Failed to re-inject event: {}", e);
+                        if pass_through {
+                            // Re-inject the original event via uinput
+                            if let Err(e) = emit_event(&ev) {
+                                log::debug!("Failed to re-inject event: {}", e);
+                            }
                         }
                     }
                 }
@@ -357,8 +389,8 @@ where
 }
 
 /// Convert evdev InputEvent to our Event type
-fn convert_event(ev: &evdev::InputEvent) -> Option<Event> {
-    match ev.kind() {
+fn convert_event(ev: &evdev::InputEvent, origin: InputOrigin) -> Option<Event> {
+    let mut event = match ev.kind() {
         InputEventKind::Key(key) => {
             let code = key.code();
             let pressed = ev.value() == 1;
@@ -461,7 +493,10 @@ fn convert_event(ev: &evdev::InputEvent) -> Option<Event> {
         }
 
         _ => None,
-    }
+    }?;
+
+    event.origin = origin;
+    Some(event)
 }
 
 /// Stop the event hook.

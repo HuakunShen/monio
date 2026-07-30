@@ -2,6 +2,7 @@
 
 mod display;
 mod listen;
+mod provenance;
 mod simulate;
 
 pub use display::{display_at_point, displays, primary_display, system_settings};

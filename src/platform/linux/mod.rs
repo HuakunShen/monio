@@ -19,17 +19,16 @@
 //!
 //! ## Grab Mode on Wayland - IMPORTANT LIMITATION
 //!
-//! On **Wayland**, grab mode has a fundamental limitation due to how Wayland
-//! compositors handle input via **libinput**:
+//! On **Wayland**, grab pass-through behavior depends on the compositor and
+//! libinput environment:
 //!
 //! - ✅ **Blocking events works**: Events you consume (return `None`) are blocked
-//! - ❌ **Pass-through fails**: Events you pass through (return `Some(event)`)
+//! - ⚠️ **Pass-through may fail**: Events you pass through (return `Some(event)`)
 //!   may not reach other applications
 //!
-//! **Why:** Wayland compositors use libinput which takes exclusive access to
-//! physical devices. When we grab via evdev, we intercept events before libinput
-//! sees them. Re-injecting via uinput creates events from a virtual device that
-//! libinput typically ignores for security.
+//! Grabbing intercepts events before the compositor sees them. Pass-through
+//! requires re-injection through a uinput virtual device, and compositor policy
+//! for those events varies.
 //!
 //! **Requirements for grab mode (even with limitations):**
 //! - Membership in the `input` group

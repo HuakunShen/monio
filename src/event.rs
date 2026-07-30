@@ -158,7 +158,7 @@ pub enum InputOrigin {
 #[cfg_attr(feature = "recorder", derive(Serialize, Deserialize))]
 #[non_exhaustive]
 pub enum InjectorIdentity {
-    /// The event carries this Monio process session's ephemeral tag and source PID.
+    /// The active backend recognizes this process session as the injector.
     ThisMonioSession,
 }
 

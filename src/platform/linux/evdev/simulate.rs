@@ -7,6 +7,7 @@
 use crate::error::{Error, Result};
 use crate::event::{Button, Event, EventType};
 use crate::keycode::Key;
+use crate::platform::linux::evdev::provenance::InjectorDeviceIdentity;
 use crate::platform::linux::keycodes::key_to_evdev_keycode;
 use evdev::{
     AttributeSet, EventType as EvdevEventType, InputEvent, Key as EvdevKey, RelativeAxisType,
@@ -16,14 +17,22 @@ use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
 
-/// Lazy-initialized virtual device for simulation
-static VIRTUAL_DEVICE: Mutex<Option<VirtualDevice>> = Mutex::new(None);
+const DEVICE_NODE_ATTEMPTS: usize = 100;
+const DEVICE_NODE_RETRY_DELAY: Duration = Duration::from_millis(10);
+
+struct VirtualDeviceState {
+    device: VirtualDevice,
+    identity: InjectorDeviceIdentity,
+}
+
+/// Process-scoped virtual device for simulation and grab pass-through.
+static VIRTUAL_DEVICE: Mutex<Option<VirtualDeviceState>> = Mutex::new(None);
 
 /// Emit raw input events directly (for grab mode re-injection).
 /// This is an internal function used by the grab mode to pass through events.
 pub(crate) fn emit_event(ev: &InputEvent) -> Result<()> {
     let mut guard = get_virtual_device()?;
-    let device = guard
+    let state = guard
         .as_mut()
         .ok_or_else(|| Error::SimulateFailed("Virtual device not initialized".into()))?;
 
@@ -38,15 +47,63 @@ pub(crate) fn emit_event(ev: &InputEvent) -> Result<()> {
         InputEvent::new(EvdevEventType::SYNCHRONIZATION, 0, 0),
     ];
 
-    device
+    state
+        .device
         .emit(&events)
         .map_err(|e| Error::SimulateFailed(format!("Failed to emit event: {}", e)))?;
 
     Ok(())
 }
 
-/// Get or create the virtual device
-fn get_virtual_device() -> Result<std::sync::MutexGuard<'static, Option<VirtualDevice>>> {
+pub(super) fn initialize() -> Result<InjectorDeviceIdentity> {
+    let guard = get_virtual_device()?;
+    guard
+        .as_ref()
+        .map(|state| state.identity.clone())
+        .ok_or_else(|| Error::SimulateFailed("Virtual device not initialized".into()))
+}
+
+fn resolve_device_identity(device: &mut VirtualDevice) -> Result<InjectorDeviceIdentity> {
+    let mut last_error = None;
+
+    for _ in 0..DEVICE_NODE_ATTEMPTS {
+        let event_nodes = device
+            .enumerate_dev_nodes_blocking()
+            .and_then(|nodes| nodes.collect::<std::io::Result<Vec<_>>>());
+
+        match event_nodes.and_then(|nodes| InjectorDeviceIdentity::from_event_nodes(&nodes)) {
+            Ok(identity) => return Ok(identity),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                last_error = Some(error);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+                return Err(Error::PermissionDenied(format!(
+                    "Cannot inspect the Monio uinput device node: {}. Make sure the current \
+                     user can access /dev/input.",
+                    error
+                )));
+            }
+            Err(error) => {
+                return Err(Error::SimulateFailed(format!(
+                    "Failed to inspect the Monio uinput device node: {}",
+                    error
+                )));
+            }
+        }
+
+        thread::sleep(DEVICE_NODE_RETRY_DELAY);
+    }
+
+    Err(Error::SimulateFailed(format!(
+        "Failed to resolve Monio uinput device identity: {}",
+        last_error
+            .map(|error| error.to_string())
+            .unwrap_or_else(|| "no input device node appeared".into())
+    )))
+}
+
+/// Get or create the process-scoped virtual device.
+fn get_virtual_device() -> Result<std::sync::MutexGuard<'static, Option<VirtualDeviceState>>> {
     let mut guard = VIRTUAL_DEVICE
         .lock()
         .map_err(|_| Error::ThreadError("mutex poisoned".into()))?;
@@ -73,11 +130,19 @@ fn get_virtual_device() -> Result<std::sync::MutexGuard<'static, Option<VirtualD
         rel_axes.insert(RelativeAxisType::REL_WHEEL);
         rel_axes.insert(RelativeAxisType::REL_HWHEEL);
 
-        let device = VirtualDeviceBuilder::new()
+        let mut device = VirtualDeviceBuilder::new()
             .map_err(|e| {
-                Error::SimulateFailed(format!("Failed to create virtual device builder: {}", e))
+                if e.kind() == std::io::ErrorKind::PermissionDenied {
+                    Error::PermissionDenied(format!(
+                        "Cannot access /dev/uinput: {}. Make sure the current user has \
+                         appropriate udev permissions.",
+                        e
+                    ))
+                } else {
+                    Error::SimulateFailed(format!("Failed to create virtual device builder: {}", e))
+                }
             })?
-            .name("monio grab passthrough")
+            .name("monio session injector")
             .with_keys(&keys)
             .map_err(|e| Error::SimulateFailed(format!("Failed to add keys: {}", e)))?
             .with_relative_axes(&rel_axes)
@@ -91,7 +156,8 @@ fn get_virtual_device() -> Result<std::sync::MutexGuard<'static, Option<VirtualD
                 ))
             })?;
 
-        *guard = Some(device);
+        let identity = resolve_device_identity(&mut device)?;
+        *guard = Some(VirtualDeviceState { device, identity });
     }
 
     Ok(guard)
@@ -112,7 +178,7 @@ fn button_to_evdev_key(button: Button) -> EvdevKey {
 /// Emit a key event
 fn emit_key(key: EvdevKey, pressed: bool) -> Result<()> {
     let mut guard = get_virtual_device()?;
-    let device = guard
+    let state = guard
         .as_mut()
         .ok_or_else(|| Error::SimulateFailed("Virtual device not initialized".into()))?;
 
@@ -123,7 +189,8 @@ fn emit_key(key: EvdevKey, pressed: bool) -> Result<()> {
         InputEvent::new(EvdevEventType::SYNCHRONIZATION, 0, 0),
     ];
 
-    device
+    state
+        .device
         .emit(&events)
         .map_err(|e| Error::SimulateFailed(format!("Failed to emit key event: {}", e)))?;
 
@@ -133,7 +200,7 @@ fn emit_key(key: EvdevKey, pressed: bool) -> Result<()> {
 /// Emit a relative movement event
 fn emit_relative(axis: RelativeAxisType, value: i32) -> Result<()> {
     let mut guard = get_virtual_device()?;
-    let device = guard
+    let state = guard
         .as_mut()
         .ok_or_else(|| Error::SimulateFailed("Virtual device not initialized".into()))?;
 
@@ -142,7 +209,8 @@ fn emit_relative(axis: RelativeAxisType, value: i32) -> Result<()> {
         InputEvent::new(EvdevEventType::SYNCHRONIZATION, 0, 0),
     ];
 
-    device
+    state
+        .device
         .emit(&events)
         .map_err(|e| Error::SimulateFailed(format!("Failed to emit relative event: {}", e)))?;
 

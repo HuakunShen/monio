@@ -1,8 +1,10 @@
 //! X11 input listening using XRecord.
 
 use crate::error::{Error, Result};
-use crate::event::{Button, Event, ScrollDirection};
+use crate::event::{Button, Event, InputOrigin, ScrollDirection};
 use crate::hook::{EventHandler, GrabHandler};
+use crate::platform::linux::x11::provenance::RequestCorrelation;
+use crate::platform::linux::x11::simulate;
 use crate::state::{
     self, MASK_ALT, MASK_BUTTON1, MASK_BUTTON2, MASK_BUTTON3, MASK_CTRL, MASK_META, MASK_SHIFT,
 };
@@ -133,7 +135,7 @@ fn convert_event(type_: c_int, code: u8, x: f64, y: f64) -> Option<Event> {
 
 /// XRecord callback
 unsafe extern "C" fn record_callback(
-    _null: *mut c_char,
+    closure: *mut c_char,
     raw_data: *mut xrecord::XRecordInterceptData,
 ) {
     unsafe {
@@ -142,6 +144,14 @@ unsafe extern "C" fn record_callback(
             None => return,
         };
 
+        let correlation = (closure as *mut RequestCorrelation).as_mut();
+        if data.category == xrecord::XRecordFromClient {
+            if let Some(correlation) = correlation {
+                correlation.observe_request(data);
+            }
+            xrecord::XRecordFreeData(raw_data);
+            return;
+        }
         if data.category != xrecord::XRecordFromServer {
             xrecord::XRecordFreeData(raw_data);
             return;
@@ -170,11 +180,15 @@ unsafe extern "C" fn record_callback(
         let code = xdatum.code;
         let x = xdatum.root_x as f64;
         let y = xdatum.root_y as f64;
+        let origin = correlation
+            .map(|correlation| correlation.classify_device_event(xdatum.type_, code))
+            .unwrap_or(InputOrigin::Unknown);
 
-        if let Some(event) = convert_event(type_, code, x, y)
+        if let Some(mut event) = convert_event(type_, code, x, y)
             && let Ok(guard) = HANDLER.lock()
             && let Some(ref handler) = *guard
         {
+            event.origin = origin;
             handler.handle_event(&event);
         }
 
@@ -215,10 +229,18 @@ pub fn run_hook<H: EventHandler + 'static>(running: &Arc<AtomicBool>, handler: H
             ));
         }
 
+        let correlation_config = query_correlation_config(dpy_control);
+
         // Prepare record range
         let mut record_range: xrecord::XRecordRange = *xrecord::XRecordAllocRange();
         record_range.device_events.first = xlib::KeyPress as c_uchar;
         record_range.device_events.last = xlib::MotionNotify as c_uchar;
+        if let Some((_, xtest_major_opcode)) = correlation_config {
+            record_range.ext_requests.ext_major.first = xtest_major_opcode;
+            record_range.ext_requests.ext_major.last = xtest_major_opcode;
+            record_range.ext_requests.ext_minor.first = 2;
+            record_range.ext_requests.ext_minor.last = 2;
+        }
 
         // Create context
         let mut record_all_clients: c_ulong = xrecord::XRecordAllClients;
@@ -256,9 +278,17 @@ pub fn run_hook<H: EventHandler + 'static>(running: &Arc<AtomicBool>, handler: H
             handler.handle_event(&Event::hook_enabled());
         }
 
+        let mut correlation = correlation_config.map(|(client_id_base, xtest_major_opcode)| {
+            RequestCorrelation::new(client_id_base, xtest_major_opcode)
+        });
+        let closure = correlation
+            .as_mut()
+            .map(|correlation| correlation as *mut RequestCorrelation as *mut c_char)
+            .unwrap_or(null::<c_char>() as *mut c_char);
+
         // Run the record loop
         let result =
-            xrecord::XRecordEnableContext(dpy_control, context, Some(record_callback), &mut 0);
+            xrecord::XRecordEnableContext(dpy_control, context, Some(record_callback), closure);
 
         // Send hook disabled event
         if let Ok(guard) = HANDLER.lock()
@@ -300,6 +330,36 @@ pub fn run_hook<H: EventHandler + 'static>(running: &Arc<AtomicBool>, handler: H
     }
 
     Ok(())
+}
+
+unsafe fn query_correlation_config(display: *mut xlib::Display) -> Option<(c_ulong, c_uchar)> {
+    let client_id_base = match simulate::initialize() {
+        Ok(client_id_base) => client_id_base,
+        Err(error) => {
+            log::warn!("X11 self-injection detection unavailable: {error}");
+            return None;
+        }
+    };
+
+    let mut major_opcode = 0;
+    let mut first_event = 0;
+    let mut first_error = 0;
+    if unsafe {
+        xlib::XQueryExtension(
+            display,
+            c"XTEST".as_ptr(),
+            &mut major_opcode,
+            &mut first_event,
+            &mut first_error,
+        )
+    } == 0
+        || !(0..=u8::MAX as c_int).contains(&major_opcode)
+    {
+        log::warn!("X11 self-injection detection unavailable: XTEST extension not available");
+        return None;
+    }
+
+    Some((client_id_base, major_opcode as c_uchar))
 }
 
 /// Stop the event hook.

@@ -1,8 +1,10 @@
 # Cross-platform input provenance handoff
 
-Status: macOS self-injection detection is implemented and verified. Windows,
-Linux X11, Linux evdev/uinput, and Wayland portal/libei work described below is
-not implemented unless explicitly marked otherwise.
+Status: macOS and Windows self-injection detection are implemented and natively
+verified. Linux evdev/uinput exact-device classification is implemented and
+compile-verified, but its privileged native acceptance matrix has not yet run.
+Linux X11 request correlation is implemented and natively verified on GNOME
+X11. Wayland portal/libei is not implemented.
 
 Last updated: 2026-07-30
 
@@ -38,9 +40,9 @@ The equivalent implementation mechanism is platform-specific:
 | Platform/backend | Intended self-injection evidence | Status |
 | --- | --- | --- |
 | macOS Core Graphics | Random process-session `EventSourceUserData` plus current source PID | Implemented and natively verified |
-| Windows low-level hooks | Random process-session `dwExtraInfo`, with injected hook flags retained as additional evidence | Proposed; current backend discards both |
-| Linux evdev/uinput | Exact Monio-created virtual-device identity | Proposed; current listener discards device identity |
-| Linux X11 XRecord/XTest | No direct per-event tag in the current path | Unresolved legacy fallback |
+| Windows low-level hooks | Random process-session `dwExtraInfo`, plus injected hook flags | Implemented and natively verified |
+| Linux evdev/uinput | Exact live character-device number owned by Monio's uinput handle | Implemented; compile-verified, privileged E2E pending |
+| Linux X11 XRecord/XTest | Persistent XTest client ID plus ordered request/device-event correlation | Implemented and natively verified on GNOME X11 |
 | Wayland portal/libei | Compositor-mediated device/session evidence; at minimum exclude virtual devices from local-source capture | Proposed; backend does not exist |
 
 ## Why this work exists
@@ -193,37 +195,21 @@ If CrossFlow later requires multiple injector processes, design an explicit,
 bounded process-session registration mechanism. Do not silently weaken the PID
 check.
 
-## Windows handoff
+## Windows: implemented reference behavior
 
-### Facts confirmed from current source
+Relevant files:
 
-Current capture:
+- `src/platform/windows/provenance.rs`;
+- `src/platform/windows/listen.rs`;
+- `src/platform/windows/simulate.rs`;
+- `examples/synthetic_input_detection.rs`.
 
-- `src/platform/windows/listen.rs`
-- low-level `WH_KEYBOARD_LL` and `WH_MOUSE_LL` hooks;
-- callbacks receive `KBDLLHOOKSTRUCT` and `MSLLHOOKSTRUCT`;
-- conversion currently retains key, button, position, wheel, and mask data;
-- conversion does not retain hook flags or `dwExtraInfo`.
-
-Current injection:
-
-- `src/platform/windows/simulate.rs`
-- uses `SendInput`;
-- both `KEYBDINPUT.dwExtraInfo` and `MOUSEINPUT.dwExtraInfo` are currently `0`.
-
-Therefore Windows currently reports `InputOrigin::Unknown`, including for
-Monio's own `SendInput` events.
-
-### Relevant Win32 evidence
-
-Low-level hook structures provide:
-
-- `KBDLLHOOKSTRUCT.flags`, including `LLKHF_INJECTED` and
-  `LLKHF_LOWER_IL_INJECTED`;
-- `MSLLHOOKSTRUCT.flags`, including `LLMHF_INJECTED` and
-  `LLMHF_LOWER_IL_INJECTED`;
-- `dwExtraInfo` in both hook structures;
-- `dwExtraInfo` in `KEYBDINPUT` and `MOUSEINPUT`.
+Windows initializes one random, nonzero 32-bit process-session tag. Every
+keyboard and mouse `SendInput` record stores it in `dwExtraInfo`. Low-level
+keyboard and mouse hooks preserve `dwExtraInfo` plus the injected flags and
+report `ThisMonioSession` only when the exact active tag matches and
+`LLKHF_INJECTED` or `LLMHF_INJECTED` is present. Zero, mismatched, untagged, and
+other-injector events remain `Unknown`.
 
 Primary references:
 
@@ -233,157 +219,141 @@ Primary references:
 - <https://learn.microsoft.com/windows/win32/api/winuser/ns-winuser-mouseinput>
 - <https://learn.microsoft.com/windows/win32/api/winuser/nf-winuser-sendinput>
 
-### Proposed Windows implementation
+Native Windows verification observed the tagged key press, key release, mouse
+target, and mouse restoration as `ThisMonioSession`. Implementation commit:
 
-1. Create a process-global random, non-zero session tag with the native
-   pointer-sized `dwExtraInfo` representation.
-2. Write it into every keyboard and mouse `SendInput` path.
-3. Preserve hook flags and `dwExtraInfo` before constructing the public event.
-4. Report `ThisMonioSession` only for an exact active tag match.
-5. Retain injected flags as backend evidence, but do not call a missing injected
-   flag proof of physical input.
-6. Keep all other events `Unknown` in the initial slice.
-
-Whether an exact self tag should additionally require the Windows injected flag
-must be decided by a native characterization test. The conservative starting
-point is to require both when Windows reliably supplies both for Monio's own
-`SendInput` path.
-
-### Required Windows TDD/native experiments
-
-Run on a real Windows host:
-
-1. Add a failing test showing a new event defaults to `Unknown` if necessary.
-2. Add pure classification tests:
-   - exact non-zero tag and expected injected flag -> self;
-   - zero tag -> unknown;
-   - mismatched tag -> unknown;
-   - injected flag from another injector -> unknown.
-3. Modify the existing diagnostic, not a timing-only replacement:
-
-   ```powershell
-   cargo run --example synthetic_input_detection
-   ```
-
-4. Require keyboard press/release and pointer target/restoration to report
-   `ThisMonioSession`.
-5. Add a negative native test using an independently chosen `dwExtraInfo` value.
-6. Run:
-
-   ```powershell
-   cargo test --all-features --all-targets
-   cargo clippy --all-features --all-targets -- -D warnings
-   cargo fmt --check
-   ```
-
-Do not report completion from a macOS cross-compile. A cross-compile proves API
-compatibility, not Win32 runtime behavior.
+```text
+4f7ce57d7d4bae60fc711bf16cb1c01355a66844
+```
 
 ## Linux X11 handoff
 
-### Facts confirmed from current source
+### Implemented mechanism
 
-Current X11 capture:
+Relevant files:
 
+- `src/platform/linux/x11/provenance.rs`;
 - `src/platform/linux/x11/listen.rs`;
-- XRecord records device events from all clients;
-- conversion keeps only event type, code, pointer coordinates, and derived
-  modifier/button state;
-- the public origin remains `Unknown`.
+- `src/platform/linux/x11/simulate.rs`.
 
-Current X11 injection:
+XTest does not provide a Monio-controlled field on the resulting device event,
+so the X11 backend does not pretend that the event carries a tag. Instead,
+Monio owns one persistent XTest display connection for the process session.
+The connection's X11 resource-ID base is its injector identity.
 
-- `src/platform/linux/x11/simulate.rs`;
-- uses XTest fake key, button, motion, and scroll events;
-- XTest calls do not carry a Monio user-data field.
+The listener asks XRecord for both:
 
-The XRecord specification explicitly says `XTestFakeInput` causes a device
-event to be recorded. In the current device-event callback, that event has no
-Monio session tag.
+- core device events from all clients;
+- `XTestFakeInput` requests.
+
+XRecord identifies requests by the originating client's resource-ID base.
+Only requests from Monio's persistent injector enter the correlation queue.
+The XRecord specification says requests are recorded immediately before
+execution and that XTest-generated device events are recorded in request
+order. The correlator validates the expected event type and key/button detail
+against the next device event. A match becomes `ThisMonioSession`; a mismatch
+clears pending state and remains `Unknown`.
+
+This is request provenance plus server ordering, not timing, coordinate, or
+suppression-window guessing. Requests from unrelated XTest clients have a
+different resource-ID base and do not enter the queue.
 
 Primary references:
 
 - <https://www.x.org/releases/X11R7.6/doc/recordproto/record.html>
 - <https://www.x.org/releases/current/doc/xextproto/xtest.pdf>
 
-### Consequence
+### Native verification recorded on 2026-07-30
 
-The current pure XRecord/XTest path cannot provide the same direct self-tag
-contract as macOS or Windows.
+The host ran GNOME in a native X11 session. A protocol probe first observed
+each request from the known injector ID immediately followed by its matching
+device event with the same server time. The retained Monio diagnostic then
+passed:
 
-Timing, coordinates, key values, and a short suppression window are heuristics.
-They can suppress unrelated physical input or fail under scheduling delay.
-They must not be documented as reliable provenance.
+```bash
+cargo run --example synthetic_input_detection
+```
 
-### Hypothesis requiring investigation
+Observed classifications:
 
-XRecord can record protocol requests as well as device events. It may be
-possible to record XTest requests from Monio's known X client and correlate
-them with subsequently recorded device events in server order.
+```text
+Tagged ControlLeft press:          YES
+Tagged ControlLeft release:        YES
+Tagged mouse target:               YES
+Tagged mouse restoration:          YES
+```
 
-This is not yet proven to be:
+The build checks also passed:
 
-- race-free with multiple clients;
-- lossless at high pointer rates;
-- able to associate one request with one output event without ambiguity;
-- simpler or safer than using evdev/uinput.
+```bash
+cargo check --features x11
+cargo check --all-features
+cargo clippy --features x11 --lib -- -D warnings
+cargo fmt --all -- --check
+```
 
-Treat request correlation as a research fallback, not the recommended Linux
-architecture.
+Full `cargo clippy --features x11 --all-targets -- -D warnings` was blocked by
+pre-existing `unnecessary_map_or` warnings in `examples/grab.rs`; the X11
+library target passed with warnings denied.
+
+### Remaining X11 acceptance work
+
+Before claiming a broad X-server compatibility matrix:
+
+1. run an unrelated XTest client concurrently and confirm its identical
+   events remain `Unknown`;
+2. stress high-rate pointer, button, and wheel injection;
+3. restart the listener while the persistent injector connection remains
+   alive;
+4. test generated key autorepeat, which has no one-to-one XTest request and
+   should remain `Unknown` rather than be guessed as self;
+5. repeat on another Xorg version and on Xwayland, without describing
+   Xwayland as a complete Wayland backend.
 
 ## Linux evdev/uinput handoff
 
-### Facts confirmed from current source
+### Implemented mechanism
 
-Current evdev capture:
+Relevant files:
 
+- `src/platform/linux/evdev/provenance.rs`;
 - `src/platform/linux/evdev/listen.rs`;
-- enumerates `/dev/input/event*` once when the hook starts;
-- opens every accessible device supporting key or relative events;
-- stores `Device` values by file descriptor;
-- `convert_event` receives only an `InputEvent`, so device identity is lost
-  before the public `Event` is created;
-- it does not exclude Monio's own uinput device.
+- `src/platform/linux/evdev/simulate.rs`.
 
-Current uinput injection:
+The process owns one persistent `VirtualDevice`. Hook and grab startup create
+it before enumerating capture devices. The pinned `evdev` 0.12.2 API resolves
+the corresponding `/dev/input/event*` node, and Monio records its live
+character-device number (`st_rdev`). Names and advertised input IDs are not
+used as provenance.
 
-- `src/platform/linux/evdev/simulate.rs`;
-- lazily creates one `VirtualDevice`;
-- current name is `monio grab passthrough`;
-- reuses that device for keyboard, button, relative pointer, and wheel events.
+Each opened capture device retains an `InputOrigin` alongside its `Device`.
+Classification uses `fstat` on the opened device fd, avoiding a pathname/open
+race. Listen mode includes the Monio node and marks converted events from it as
+`ThisMonioSession`. Grab mode fails closed on fd inspection errors and excludes
+that exact node so pass-through re-injection cannot feed back into the same
+grab loop. Every other device remains `Unknown`.
 
-Current risks:
+The virtual device stays alive for the process session, so hook restart reuses
+the same kernel identity. Startup fails explicitly if Monio can create the
+uinput device but cannot open its event node for listen classification.
 
-1. If the listener starts before the lazy virtual device exists, it will not
-   monitor that device during the current one-time enumeration.
-2. If the listener starts or restarts after the virtual device exists, it may
-   include Monio's own device.
-3. Current conversion cannot say which device produced an event.
-4. A name-only exclusion is spoofable and may exclude an unrelated device.
-5. Hotplug and device removal are not modeled.
+The listener still enumerates devices once per hook start. General physical
+device hotplug/removal is not newly handled by this provenance slice.
 
-### Recommended evdev/uinput direction
+### Verification recorded on 2026-07-30
 
-Use exact device identity, not event-value correlation:
+The Linux host was Ubuntu with kernel `7.0.0-28-generic`; its local GNOME
+desktop used X11. These checks passed:
 
-1. Create the Monio uinput device before capture enumeration.
-2. Give the virtual device a process-session identity using the strongest
-   metadata supported by the selected `evdev` crate and kernel APIs.
-3. Resolve and retain the exact resulting `/dev/input/event*` node or equivalent
-   stable identity owned by the `VirtualDevice`.
-4. Change the event loop so conversion receives a typed device context together
-   with each `InputEvent`.
-5. Classify events from that exact device as `ThisMonioSession`, or exclude the
-   device from local capture entirely.
-6. Preserve physical/other-device events as `Unknown` until a separate
-   device-backed contract is designed.
-7. Handle device hotplug and hook restart explicitly.
+```bash
+cargo check --no-default-features --features evdev
+cargo fmt --all -- --check
+```
 
-The exact stable identity mechanism is an implementation question for the
-native Linux host. Candidate evidence includes the created event node,
-sysfs/udev identity, input ID, physical path, and unique field. Verify which
-fields survive uinput creation and are exposed by the pinned `evdev` version.
-Do not assume a unique device name alone is sufficient.
+The current user was not a member of the `input` group and `/dev/uinput` was
+owned by root with mode `0600`, so the privileged native loopback experiment
+was not run. This implementation must not be described as natively verified
+until the matrix below passes.
 
 ### Required privileged/container experiments
 
@@ -543,8 +513,9 @@ Wayland session
   3. evdev/uinput only for an intentionally privileged deployment
 
 X11 session
-  1. evdev/uinput when the installation grants device permissions
-  2. XRecord/XTest compatibility fallback with Unknown provenance
+  1. XRecord/XTest for unprivileged global capture, simulation, and
+     request-correlated self provenance
+  2. evdev/uinput when kernel-level device access or suppression is required
 ```
 
 For a headless agent, appliance, test container, or explicitly privileged
@@ -641,13 +612,12 @@ hook structures.
 
 Recommended sequence:
 
-1. Windows tag/flags implementation and native diagnostic.
-2. Linux evdev/uinput exact-device identity and privileged E2E.
-3. A capability-reporting design so unsupported X11 provenance is explicit.
+1. Linux evdev/uinput privileged E2E for the implemented exact-device identity.
+2. Linux X11 unrelated-client, stress, restart, and autorepeat acceptance.
+3. A capability-reporting design for backend-specific guarantees.
 4. Wayland portal/libei proof of concept on one supported compositor.
 5. Wayland zone/barrier and capture/release integration.
 6. Native GNOME/KDE compatibility matrix.
-7. Decide whether pure X11 request correlation is worth maintaining.
 
 Each platform slice should be separately reviewable and must preserve the
 macOS behavior.
@@ -683,26 +653,15 @@ Before changing code:
 10. Update this document's status, confirmed facts, experiments, and remaining
     unknowns.
 
-Suggested Windows prompt:
-
-```text
-Read AGENTS.md and docs/input-provenance-cross-platform-handoff.md completely.
-Implement only the Windows self-injection provenance slice with TDD. Preserve
-the macOS contract. Use a random process-session dwExtraInfo tag, retain the
-low-level hook evidence, run the synthetic_input_detection example natively,
-and update the handoff with exact commands and results. Do not claim that an
-untagged event is physical.
-```
-
 Suggested Linux evdev/uinput prompt:
 
 ```text
 Read AGENTS.md and docs/input-provenance-cross-platform-handoff.md completely.
-Implement only exact self-device provenance for the evdev/uinput backend with
-TDD and privileged native/container E2E. Preserve device identity through
-capture, exclude or classify only Monio's exact virtual device, cover listener
-restart and a second unrelated virtual device, and update the handoff with
-exact evidence. Do not use device name alone as identity.
+Verify the implemented exact self-device provenance for the evdev/uinput
+backend with privileged native/container E2E. Cover listener restart, a second
+unrelated virtual device, permission failures, and grab feedback. Update the
+handoff with exact commands and results. Do not use device name alone as
+identity, and do not claim completion from compile checks.
 ```
 
 Suggested Wayland research prompt:
