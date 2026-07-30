@@ -15,8 +15,8 @@ A pure Rust cross-platform input hook library with **proper drag detection**.
 - **Event recording & playback**: Record and replay macros (requires `recorder` feature)
 - **Input statistics**: Analyze typing speed, mouse distance, etc. (requires `statistics` feature)
 - **Display queries**: Get monitor info, DPI scale, system settings (multi-monitor support)
-- **Pure Rust**: No C dependencies (uses native Rust bindings)
-- **Event simulation**: Programmatically generate keyboard and mouse events
+- **Rust API**: Native platform bindings behind one cross-platform interface
+- **Event simulation**: Programmatically generate absolute or relative keyboard and mouse events
 - **Thread-safe**: Atomic state tracking for reliable button/modifier detection
 
 ## The Problem This Solves
@@ -61,6 +61,19 @@ monio = { version = "0.2", features = ["tokio", "recorder", "statistics"] }
 # Linux: evdev support (works on X11 AND Wayland)
 monio = { version = "0.2", features = ["evdev"], default-features = false }
 ```
+
+Linux X11 builds require the X11, Xi, and Xtst development packages:
+
+```bash
+# Debian/Ubuntu build host
+sudo apt install libx11-dev libxi-dev libxtst-dev
+```
+
+The default Linux binary is dynamically linked to `libX11.so.6`,
+`libXi.so.6`, and `libXtst.so.6`. Desktop distributions normally already
+install the runtime libraries. A `.deb`/`.rpm` should declare them as runtime
+dependencies; a self-contained application format may bundle them. XI2 itself
+is an X-server extension, not a separate application the user must start.
 
 ### AI agent skill
 
@@ -136,8 +149,29 @@ fn main() {
 | ------------- | ------------ | --------------------------------------------------- |
 | macOS         | ✅ Full      | Via CGEventTap                                      |
 | Windows       | ✅ Full      | Via low-level hooks                                 |
-| Linux/X11     | ✅ Active    | XGrabKeyboard/XGrabPointer with XTest pass-through  |
+| Linux/X11     | ✅ Active    | XGrab + XI2 RawMotion with XTest pass-through       |
 | Linux/Wayland | ⚠️ Limited   | See [Wayland Limitation](#wayland-limitation) below |
+
+On Linux/X11, ordinary `listen()` keeps reporting absolute motion.
+`grab()` requires XI2 2.0+ and attaches raw relative deltas to
+`mouse.relative`. Those deltas come from XI2 raw motion rather than being
+derived from cursor coordinates that may be clipped at a screen edge. Native
+edge behavior still needs verification on each supported X11 environment:
+
+```rust
+use monio::{Event, EventType, grab};
+
+grab(|event: &Event| {
+    if matches!(event.event_type, EventType::MouseMoved | EventType::MouseDragged)
+        && let Some(relative) = event.mouse.as_ref().and_then(|mouse| mouse.relative)
+    {
+        println!("relative: {}, {}", relative.delta_x, relative.delta_y);
+        return None; // consume locally while forwarding to a remote computer
+    }
+    Some(event.clone())
+})?;
+# Ok::<(), monio::Error>(())
+```
 
 ### Channel-Based Listening (Non-Blocking)
 
@@ -186,11 +220,16 @@ async fn main() {
 ### Simulating Events
 
 ```rust
-use monio::{key_tap, mouse_move, mouse_click, Key, Button};
+use monio::{
+    key_tap, mouse_click, mouse_move, mouse_move_relative, Button, Key,
+};
 
 fn main() -> monio::Result<()> {
     // Move mouse to position
     mouse_move(100.0, 200.0)?;
+
+    // Or move by an offset
+    mouse_move_relative(20.0, -10.0)?;
 
     // Click
     mouse_click(Button::Left)?;
@@ -404,9 +443,15 @@ No special permissions required for hooking. Simulation may require the app to b
 Two backends are available:
 
 **X11 (default)**: Uses XRecord for listen-only capture, active
-`XGrabKeyboard`/`XGrabPointer` sessions for `grab()`, and XTest for simulation
-and grab pass-through. It works only on X11 and requires no `input` group or
-`/dev/uinput` access.
+`XGrabKeyboard`/`XGrabPointer` sessions plus XI2 RawMotion for `grab()`, and
+XTest for simulation and grab pass-through. It works only on X11 and requires
+no `input` group or `/dev/uinput` access. `grab()` fails explicitly if the X
+server does not support XI2 2.0 or newer.
+
+`MouseData::x/y` remain absolute screen coordinates. In X11 grab mode,
+`MouseData::relative` contains raw `delta_x/delta_y`; in ordinary XRecord
+listen mode it is `None`. Use `mouse_move_relative()` or pass the captured
+event to `simulate()` on a remote target to replay relative motion.
 
 When an X11 grab handler passes a pointer press, Monio yields that complete
 pointer gesture to the receiving application and reacquires the pointer after
@@ -473,6 +518,9 @@ cargo run --example synthetic_input_detection
 
 # Event grabbing (block specific keys)
 cargo run --example grab
+
+# X11 relative grab diagnostic (temporarily grabs input for at most 10 seconds)
+cargo run --features x11 --example x11_relative_grab_detection
 
 # Display information
 cargo run --example display

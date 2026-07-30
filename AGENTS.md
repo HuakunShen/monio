@@ -40,6 +40,7 @@ cargo run --example grab               # block specific keys
 cargo run --example simulate           # synthesize input
 cargo run --example synthetic_input_detection # verify macOS/Windows self-injection provenance
 cargo run --features x11 --example x11_grab_detection # native X11 grab diagnostic
+cargo run --features x11 --example x11_relative_grab_detection # XI2 relative-motion diagnostic
 cargo run --example mouse_position     # query cursor position
 cargo run --example display            # monitor/DPI/system-settings query
 cargo run --example channel_sync       # non-blocking std mpsc channel
@@ -55,7 +56,7 @@ cargo run --example tui_key_displayer  # ratatui TUI, keys/mouse live view
 Two independent, mutually-exclusive backends; `x11` is the default.
 
 ```bash
-# X11 (default) — XRecord listen, active X11 grab, XTest simulate/pass-through.
+# X11 (default) — XRecord listen, XI2 active grab, XTest simulate/pass-through.
 # Does not work on Wayland and needs no input-group/uinput permission.
 cargo build --features x11
 
@@ -64,7 +65,9 @@ cargo build --features x11
 cargo build --features evdev --no-default-features
 ```
 
-CI installs `libx11-dev libxtst-dev libevdev-dev` on Ubuntu for these builds.
+CI installs `libx11-dev libxi-dev libxtst-dev libevdev-dev` on Ubuntu for these
+builds. X11 release binaries dynamically link `libX11.so.6`, `libXi.so.6`, and
+`libXtst.so.6`.
 
 ### Input provenance work
 
@@ -135,11 +138,14 @@ This shared contract is what lets `Hook`, `channel::*`, `EventRecorder`, and `St
 
 **Windows**: Uses the `windows` crate with low-level hooks (`WH_KEYBOARD_LL`, `WH_MOUSE_LL`). Full grab support. No special permissions for hooking; simulation may need Administrator in some contexts.
 
-**Linux**: X11 uses XRecord for listening, active
-`XGrabKeyboard`/`XGrabPointer` sessions for `grab()`, and XTest for simulation
-and pass-through (default, X11-only). A passed pointer press yields the complete
-local pointer gesture until the receiving application's implicit grab ends;
-the handler may not receive that gesture's intermediate motion/release events.
+**Linux**: X11 uses XRecord for absolute-only listening, active
+`XGrabKeyboard`/`XGrabPointer` sessions plus XI2 RawMotion for `grab()`, and
+XTest for absolute/relative simulation and pass-through (default, X11-only).
+Grab motion keeps absolute `MouseData::x/y` and adds raw deltas in
+`MouseData::relative`; `listen()` leaves `relative` as `None`. A passed pointer
+press yields the complete local pointer gesture until the receiving
+application's implicit grab ends; the handler may not receive that gesture's
+intermediate motion/release events.
 evdev reads `/dev/input` directly and works under both X11 and Wayland, but
 **Wayland grab pass-through is unreliable**: consuming events (`None`) works,
 but re-injected pass-through events (`Some(event)`) are typically ignored by

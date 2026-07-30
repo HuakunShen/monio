@@ -5,7 +5,10 @@ verified. Linux evdev/uinput exact-device classification has passed a native
 self-loopback test, but its unrelated-device, grab, restart, and hotplug matrix
 is still pending. Linux X11 request correlation is implemented and natively
 verified on GNOME X11. X11 active keyboard/pointer grab support is implemented
-and natively verified on GNOME X11 and an isolated Xvfb server. Wayland
+and natively verified on GNOME X11 and an isolated Xvfb server. XI2 relative
+grab motion and relative XTest injection are implemented; automated
+initialization/injection/cleanup checks pass, while physical RawMotion,
+screen-edge, drag, and pass-through acceptance remains pending. Wayland
 portal/libei is not implemented.
 
 Last updated: 2026-07-30
@@ -242,7 +245,8 @@ Relevant files:
 
 - `src/platform/linux/x11/provenance.rs`;
 - `src/platform/linux/x11/listen.rs`;
-- `src/platform/linux/x11/simulate.rs`.
+- `src/platform/linux/x11/simulate.rs`;
+- `src/platform/linux/x11/xinput.rs`.
 
 XTest does not provide a Monio-controlled field on the resulting device event,
 so the X11 backend does not pretend that the event carries a tag. Instead,
@@ -375,21 +379,22 @@ Relevant files:
 
 1. opens a dedicated X connection and maps a 1x1 off-screen,
    override-redirect `InputOnly` window;
-2. acquires `XGrabKeyboard` first and `XGrabPointer` second;
-3. rolls the keyboard grab back if pointer acquisition fails;
-4. reports `AlreadyGrabbed`, `GrabInvalidTime`, `GrabNotViewable`, and
+2. requires XI2 2.0+ and selects `XI_RawMotion` for the master pointer;
+3. acquires `XGrabKeyboard` first and `XGrabPointer` second;
+4. rolls the keyboard grab back if pointer acquisition fails;
+5. reports `AlreadyGrabbed`, `GrabInvalidTime`, `GrabNotViewable`, and
    `GrabFrozen` with device-specific startup errors;
-5. dispatches keyboard, button, wheel, and motion events through the existing
-   Monio conversion/state path;
-6. consumes events whose handler returns `None`;
-7. releases, XTest-replays, and reacquires around passed key and standalone
-   motion events;
-8. yields a complete pointer gesture after a passed `ButtonPress`, because the
+6. dispatches keyboard, button, and wheel events from the core stream, while
+   XI2 raw events are the single handler source for pointer motion;
+7. consumes events whose handler returns `None`;
+8. temporarily deselects raw motion, releases, XTest-replays, reacquires, and
+   reselects around passed standalone motion;
+9. yields a complete pointer gesture after a passed `ButtonPress`, because the
    receiving X11 client owns an implicit pointer grab until release, then
-   reacquires the pointer;
-9. ungrabs both devices, destroys the window, and closes the connection on
-   normal stop or error. X11 also releases the grabs automatically if the
-   process connection dies.
+   reacquires the pointer and raw selection;
+10. deselects raw motion, ungrabs both devices, destroys the window, and closes
+    the connection on normal stop or error. X11 also releases the grabs
+    automatically if the process connection dies.
 
 A passed pointer press is therefore a gesture-level decision on X11. The
 handler can see the press that starts the pass-through, but may not see its
@@ -455,6 +460,94 @@ The diagnostic observer is deliberately placed at root coordinates `(256,
 window before generating events. Its original `(32, 32)` location was under
 GNOME's top-bar/compositor overlay, so a passed right-button gesture went to
 GNOME Shell rather than the observer and produced a false failure.
+
+### X11 relative motion for CrossFlow
+
+Relevant files:
+
+- `src/event.rs`;
+- `src/platform/motion.rs`;
+- `src/platform/linux/x11/xinput.rs`;
+- `src/platform/linux/x11/listen.rs`;
+- `src/platform/linux/x11/simulate.rs`;
+- `examples/x11_relative_grab_detection.rs`.
+
+`MouseData` now has `relative: Option<RelativeMotion>`. Absolute `x`/`y`
+coordinates retain their old meaning:
+
+- ordinary XRecord `listen()` motion has `relative: None`;
+- active X11 `grab()` motion has both current root coordinates and XI2 raw
+  `delta_x`/`delta_y`;
+- `MouseMoved` versus `MouseDragged` still comes from Monio's held-button
+  state;
+- `simulate()` prefers relative replay when an event carries relative data;
+- `mouse_move_relative(delta_x, delta_y)` is available as a direct public
+  injection API.
+
+The grab connection selects `XI_RawMotion` for `XIAllMasterDevices` on the
+root window. It decodes XI2's sparse valuator mask and packed `raw_values`;
+valuator 0 is horizontal motion and valuator 1 is vertical motion. Core
+`MotionNotify` is ignored while raw selection is active so one physical
+movement cannot create both an absolute and a relative handler callback.
+Using raw rather than clipped root-coordinate differences is what should keep
+CrossFlow movement available at a local screen edge.
+
+If XI2 2.0 negotiation or event selection fails, `grab()` fails before
+`HookEnabled`; it does not silently fall back to absolute-only motion. Relative
+grab events remain `InputOrigin::Unknown`, consistent with the active-grab
+safety boundary.
+
+The public X11 relative injector uses `XTestFakeRelativeMotionEvent`. The
+system XTest header exposes the correct four-argument ABI
+`(display, delta_x, delta_y, delay)`, but x11-rs 2.21 declares an incorrect
+five-argument signature. Monio therefore uses a narrow local FFI declaration
+with the header's four-argument ABI rather than calling the incorrect binding.
+
+Enabling x11-rs `xinput` adds a dynamic libXi dependency. Ubuntu/Debian build
+hosts need `libxi-dev`; deployed dynamically linked applications need
+`libXi.so.6` (normally supplied by `libxi6`). XI2 is an X-server extension,
+not a separate user application. Static X11 desktop linking is not the default
+or recommended packaging path.
+
+Automated checks completed on 2026-07-30:
+
+```bash
+cargo test --features x11
+cargo clippy --features x11 --all-targets -- -D warnings
+xvfb-run -a cargo run --features x11 \
+  --example x11_relative_grab_detection -- --self-test
+xvfb-run -a cargo run --features x11 \
+  --example x11_relative_grab_detection -- --self-test --pass-through
+```
+
+Both Xvfb modes negotiated XI2, acquired and released the grabs, moved the
+pointer right/down with relative injection, and restored its origin with the
+inverse injection. The unit suite covers sparse XI2 X/Y valuators, movement
+versus drag construction, serialization compatibility, relative replay
+dispatch, and XTest integer normalization. A release build inspected with
+`ldd` resolved `libX11.so.6`, `libXi.so.6`, and `libXtst.so.6` dynamically.
+
+XTest-generated core or device motion does **not** produce XI2 RawMotion on
+this server. The official `xinput test-xi2` observer also received zero raw
+events from both XTest forms, so an XTest self-test must not be presented as
+proof of physical raw capture. A delayed Monio uinput probe was also not
+attached as an Xorg slave pointer (`xinput list` never showed it), so it could
+not substitute for hardware.
+
+The following native hardware acceptance therefore remains required:
+
+```bash
+cargo run --features x11 --example x11_relative_grab_detection
+cargo run --features x11 --example x11_relative_grab_detection -- --pass-through
+```
+
+During the first ten-second run, move in all directions, push against each
+screen edge, and drag with a held button. Require nonzero relative events,
+correct signs, zero missing-relative events, continued edge deltas, and at
+least one `MouseDragged`. During pass-through, require one local movement per
+physical movement with no feedback loop or doubling. Both runs must release
+the keyboard and pointer immediately on Escape or timeout. Do not describe
+these physical behaviors as natively verified until this output is recorded.
 
 Do not make the first CrossFlow implementation depend on selective local
 pass-through. While control is on B or C, all captured keyboard and pointer

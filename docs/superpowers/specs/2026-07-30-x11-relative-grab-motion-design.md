@@ -245,10 +245,14 @@ Build validation covers:
 X11 integration validation covers:
 
 - XI2 initialization under Xvfb;
-- one handler callback per injected relative movement;
-- expected positive and negative delta signs;
-- no self-replay feedback loop when the handler passes motion through;
+- relative XTest injection moving and restoring the Xvfb pointer;
+- grab acquisition and cleanup in consume and pass-through configurations;
 - existing keyboard, pointer-button, and wheel grab behavior.
+
+XTest-generated motion does not traverse the XI2 raw-device path on the tested
+X server, so it cannot verify raw callbacks. One callback per physical
+movement, positive/negative delta signs, edge continuation, and pass-through
+feedback behavior require the native hardware diagnostic below.
 
 Native X11 validation uses a diagnostic example and the current desktop
 session:
