@@ -96,7 +96,8 @@ mod linux {
         println!("Press Escape to stop; Ctrl+C and a ten-second timeout are fallbacks.");
         if self_test {
             println!("Self-test will inject right/down and left/up relative motion.");
-            println!("XTest does not generate XI2 RawMotion; hardware capture is not asserted.");
+            println!("This checks XI2 2.1 RawMotion delivery from XTest.");
+            println!("Physical hardware capture remains a separate native check.");
         } else {
             println!("Move in every direction and continue pushing against a screen edge.");
             println!("Hold a mouse button while moving to verify MouseDragged.");
@@ -209,6 +210,18 @@ mod linux {
         {
             return Err(io::Error::other(
                 "relative injection did not move and restore the X11 pointer",
+            )
+            .into());
+        }
+        if self_test
+            && (observed.relative_events < 2
+                || !observed.positive_x
+                || !observed.positive_y
+                || !observed.negative_x
+                || !observed.negative_y)
+        {
+            return Err(io::Error::other(
+                "XI2 did not report both directions of the XTest relative motion",
             )
             .into());
         }

@@ -5,8 +5,12 @@ use std::slice;
 use x11::{xinput2, xlib};
 
 const XI2_MAJOR: c_int = 2;
-const XI2_MINOR: c_int = 0;
+const XI2_MINOR: c_int = 1;
 const RAW_MOTION_MASK_LEN: usize = (xinput2::XI_RawMotion as usize / 8) + 1;
+
+fn supports_grab_independent_raw_events(major: c_int, minor: c_int) -> bool {
+    major > XI2_MAJOR || (major == XI2_MAJOR && minor >= XI2_MINOR)
+}
 
 pub(super) struct RawMotionInput {
     opcode: c_int,
@@ -30,16 +34,18 @@ impl RawMotionInput {
         };
         if extension_available == 0 {
             return Err(Error::HookStartFailed(
-                "XInputExtension is unavailable; X11 grab requires XI2 2.0 or newer".into(),
+                "XInputExtension is unavailable; X11 grab requires XI2 2.1 or newer".into(),
             ));
         }
 
         let mut major = XI2_MAJOR;
         let mut minor = XI2_MINOR;
         let version_status = unsafe { xinput2::XIQueryVersion(display, &mut major, &mut minor) };
-        if version_status != xlib::Success as c_int || major < XI2_MAJOR {
+        if version_status != xlib::Success as c_int
+            || !supports_grab_independent_raw_events(major, minor)
+        {
             return Err(Error::HookStartFailed(format!(
-                "X11 grab requires XI2 2.0 or newer; server reported {major}.{minor}"
+                "X11 grab requires XI2 2.1 or newer; server reported {major}.{minor}"
             )));
         }
 
@@ -182,6 +188,16 @@ fn decode_axes(mask: &[u8], values: &[f64]) -> Option<RelativeMotion> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn xi20_lacks_grab_independent_raw_events() {
+        assert!(!supports_grab_independent_raw_events(2, 0));
+    }
+
+    #[test]
+    fn xi21_has_grab_independent_raw_events() {
+        assert!(supports_grab_independent_raw_events(2, 1));
+    }
 
     #[test]
     fn decodes_both_relative_axes() {

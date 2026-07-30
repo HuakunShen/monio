@@ -6,12 +6,12 @@
 
 **Architecture:** Extend existing mouse events with optional relative data while preserving absolute coordinates and event types. Keep XRecord-based `listen()` unchanged; add a focused XI2 helper to the active-grab path, suppress duplicate core motion callbacks, and use XTest for relative injection. Temporarily disable raw selection during local pass-through so Monio does not capture its own replay.
 
-**Tech Stack:** Rust 2024, x11-rs 2.21 (`xlib`, `xrecord`, `xinput`, `xtest`), XInput2 2.0+, libXi, XTest, serde-gated recorder support, Xvfb/native X11 diagnostics.
+**Tech Stack:** Rust 2024, x11-rs 2.21 (`xlib`, `xrecord`, `xinput`, `xtest`), XInput2 2.1+, libXi, XTest, serde-gated recorder support, Xvfb/native X11 diagnostics.
 
 ## Global Constraints
 
 - X11 `listen()` remains XRecord-based and continues to report `relative: None`.
-- A successfully started X11 `grab()` requires XI2 2.0+ and reports relative data for pointer motion.
+- A successfully started X11 `grab()` requires XI2 2.1+ and reports relative data for pointer motion.
 - `MouseData::x` and `MouseData::y` always remain absolute screen coordinates.
 - Relative motion must continue while the core pointer is clipped at a screen edge.
 - A physical motion produces one grab-handler callback, not separate core and XI2 callbacks.
@@ -713,7 +713,8 @@ The example must:
 - call `Hook::stop()` and join before exiting;
 - provide `--self-test`, which injects known right/down and left/up relative
   movements after `HookEnabled`, verifies the pointer moved and returned, and
-  does not claim XTest motion exercises XI2 RawMotion.
+  requires XI2 RawMotion in both directions while keeping physical capture as
+  a separate native check.
 
 Use an atomic stop request rather than calling `Hook::stop()` from inside the
 grab callback.
@@ -732,9 +733,10 @@ Expected:
 - `missing relative events` is zero;
 - the process exits successfully without leaving a grab behind.
 
-XTest does not generate XI2 RawMotion on the tested X server. Raw callback
-signs, edge continuation, drag classification, and replay-loop behavior must
-be verified with the physical native runs, not inferred from this Xvfb test.
+XI 2.0 negotiation did not deliver XTest-generated XI2 RawMotion on the tested
+server. With XI 2.1 negotiation, the self-test observes both directions of
+XTest-generated RawMotion. Edge continuation, physical drag classification,
+and replay-loop behavior must still be verified with the native runs.
 
 Then run on the native desktop:
 

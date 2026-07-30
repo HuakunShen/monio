@@ -145,11 +145,11 @@ links libXi.
 `HookEnabled`:
 
 1. Query the `XInputExtension` opcode.
-2. Negotiate XI2 version 2.0 or newer with `XIQueryVersion`.
+2. Negotiate XI2 version 2.1 or newer with `XIQueryVersion`.
 3. Select `XI_RawMotion` for `XIAllMasterDevices` on the root window.
 4. Acquire the existing keyboard and pointer grabs.
 
-If XI2 2.0 or raw-motion selection is unavailable, X11 `grab()` fails with an
+If XI2 2.1 or raw-motion selection is unavailable, X11 `grab()` fails with an
 actionable `HookStartFailed` error. It does not silently start an
 absolute-only grab, because a successfully started grab must satisfy the new
 relative-motion contract. Ordinary X11 `listen()` remains available because it
@@ -249,10 +249,11 @@ X11 integration validation covers:
 - grab acquisition and cleanup in consume and pass-through configurations;
 - existing keyboard, pointer-button, and wheel grab behavior.
 
-XTest-generated motion does not traverse the XI2 raw-device path on the tested
-X server, so it cannot verify raw callbacks. One callback per physical
-movement, positive/negative delta signs, edge continuation, and pass-through
-feedback behavior require the native hardware diagnostic below.
+With XI 2.1 negotiation, XTest-generated relative motion traverses the XI2 raw
+event path on the tested X server. The automated test checks both relative
+directions, while one callback per physical movement, edge continuation, and
+pass-through feedback behavior still require the native hardware diagnostic
+below.
 
 Native X11 validation uses a diagnostic example and the current desktop
 session:

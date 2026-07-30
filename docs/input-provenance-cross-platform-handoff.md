@@ -7,8 +7,9 @@ is still pending. Linux X11 request correlation is implemented and natively
 verified on GNOME X11. X11 active keyboard/pointer grab support is implemented
 and natively verified on GNOME X11 and an isolated Xvfb server. XI2 relative
 grab motion and relative XTest injection are implemented; automated
-initialization/injection/cleanup checks pass, while physical RawMotion,
-screen-edge, drag, and pass-through acceptance remains pending. Wayland
+initialization/injection/cleanup checks and native physical RawMotion/drag
+capture pass. Explicit screen-edge and pass-through feel confirmation remains
+pending. Wayland
 portal/libei is not implemented.
 
 Last updated: 2026-07-30
@@ -379,7 +380,7 @@ Relevant files:
 
 1. opens a dedicated X connection and maps a 1x1 off-screen,
    override-redirect `InputOnly` window;
-2. requires XI2 2.0+ and selects `XI_RawMotion` for the master pointer;
+2. requires XI2 2.1+ and selects `XI_RawMotion` for the master pointer;
 3. acquires `XGrabKeyboard` first and `XGrabPointer` second;
 4. rolls the keyboard grab back if pointer acquisition fails;
 5. reports `AlreadyGrabbed`, `GrabInvalidTime`, `GrabNotViewable`, and
@@ -492,10 +493,16 @@ movement cannot create both an absolute and a relative handler callback.
 Using raw rather than clipped root-coordinate differences is what should keep
 CrossFlow movement available at a local screen edge.
 
-If XI2 2.0 negotiation or event selection fails, `grab()` fails before
+If XI2 2.1 negotiation or event selection fails, `grab()` fails before
 `HookEnabled`; it does not silently fall back to absolute-only motion. Relative
 grab events remain `InputOrigin::Unknown`, consistent with the active-grab
 safety boundary.
+
+The client must request XI 2.1, not merely test whether the server supports a
+2.x release. XI 2.1 introduced RawEvents delivery regardless of grab state.
+The first native diagnostic negotiated only XI 2.0 and consequently received
+zero raw events even though the X.Org server supported XI 2.4. Requiring and
+requesting XI 2.1 fixed the native capture path.
 
 The public X11 relative injector uses `XTestFakeRelativeMotionEvent`. The
 system XTest header exposes the correct four-argument ABI
@@ -521,33 +528,42 @@ xvfb-run -a cargo run --features x11 \
 ```
 
 Both Xvfb modes negotiated XI2, acquired and released the grabs, moved the
-pointer right/down with relative injection, and restored its origin with the
-inverse injection. The unit suite covers sparse XI2 X/Y valuators, movement
-versus drag construction, serialization compatibility, relative replay
-dispatch, and XTest integer normalization. A release build inspected with
-`ldd` resolved `libX11.so.6`, `libXi.so.6`, and `libXtst.so.6` dynamically.
+pointer right/down with relative injection, observed the corresponding
+positive XI2 RawMotion, restored its origin with inverse injection, and
+observed negative RawMotion. The self-test now requires both directions rather
+than merely checking the final pointer positions. The unit suite covers sparse
+XI2 X/Y valuators, movement versus drag construction, serialization
+compatibility, relative replay dispatch, and XTest integer normalization. A
+release build inspected with `ldd` resolved `libX11.so.6`, `libXi.so.6`, and
+`libXtst.so.6` dynamically.
 
-XTest-generated core or device motion does **not** produce XI2 RawMotion on
-this server. The official `xinput test-xi2` observer also received zero raw
-events from both XTest forms, so an XTest self-test must not be presented as
-proof of physical raw capture. A delayed Monio uinput probe was also not
-attached as an Xorg slave pointer (`xinput list` never showed it), so it could
-not substitute for hardware.
+The earlier XTest probes negotiated only XI 2.0 and received zero RawMotion.
+After requesting XI 2.1, the same relative XTest injection produced RawMotion,
+which is consistent with XI 2.1 adding delivery regardless of grab state. This
+automated path verifies the event pipeline but is not a substitute for physical
+hardware capture. A delayed Monio uinput probe was also not attached as an Xorg
+slave pointer (`xinput list` never showed it), so it could not provide a
+separate hardware-shaped source.
 
-The following native hardware acceptance therefore remains required:
+Native hardware acceptance on the GNOME X11 session recorded:
 
 ```bash
 cargo run --features x11 --example x11_relative_grab_detection
 cargo run --features x11 --example x11_relative_grab_detection -- --pass-through
 ```
 
-During the first ten-second run, move in all directions, push against each
-screen edge, and drag with a held button. Require nonzero relative events,
-correct signs, zero missing-relative events, continued edge deltas, and at
-least one `MouseDragged`. During pass-through, require one local movement per
-physical movement with no feedback loop or doubling. Both runs must release
-the keyboard and pointer immediately on Escape or timeout. Do not describe
-these physical behaviors as natively verified until this output is recorded.
+The consume run received 992 relative motion events, including 176
+`MouseDragged` events. The pass-through run received 252 relative motion
+events, including 129 `MouseDragged` events. Both runs observed positive and
+negative X and Y deltas, reported zero motion events without relative data,
+and released the grab at timeout. This verifies physical XI2 RawMotion
+delivery, sparse-axis decoding, direction signs, drag classification, and
+normal-stop cleanup on this system.
+
+The output alone does not prove that raw deltas continued while repeatedly
+pushing against a screen edge, or that local pass-through felt one-to-one
+without feedback, doubling, or jumps. Record those two observations explicitly
+before marking edge and pass-through behavior natively accepted.
 
 Do not make the first CrossFlow implementation depend on selective local
 pass-through. While control is on B or C, all captured keyboard and pointer
