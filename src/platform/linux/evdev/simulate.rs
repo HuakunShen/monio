@@ -9,6 +9,7 @@ use crate::event::{Button, Event, EventType};
 use crate::keycode::Key;
 use crate::platform::linux::evdev::provenance::InjectorDeviceIdentity;
 use crate::platform::linux::keycodes::key_to_evdev_keycode;
+use crate::platform::motion::{Motion, motion_from_event};
 use evdev::{
     AttributeSet, EventType as EvdevEventType, InputEvent, Key as EvdevKey, RelativeAxisType,
     uinput::{VirtualDevice, VirtualDeviceBuilder},
@@ -270,11 +271,13 @@ pub fn simulate(event: &Event) -> Result<()> {
                 mouse_release(*button)?;
             }
         }
-        EventType::MouseMoved | EventType::MouseDragged => {
-            if let Some(mouse) = &event.mouse {
-                mouse_move(mouse.x, mouse.y)?;
+        EventType::MouseMoved | EventType::MouseDragged => match motion_from_event(event) {
+            Some(Motion::Absolute { x, y }) => mouse_move(x, y)?,
+            Some(Motion::Relative { delta_x, delta_y }) => {
+                mouse_move_relative(delta_x, delta_y)?;
             }
-        }
+            None => {}
+        },
         _ => {}
     }
     Ok(())
@@ -336,10 +339,15 @@ pub fn mouse_position() -> Result<(f64, f64)> {
 /// For absolute positioning, the cursor needs to already be at (0,0)
 /// or we need to track current position (which is complex).
 pub fn mouse_move(x: f64, y: f64) -> Result<()> {
+    mouse_move_relative(x, y)
+}
+
+/// Move the mouse by a relative offset.
+pub fn mouse_move_relative(delta_x: f64, delta_y: f64) -> Result<()> {
     // For simplicity, we emit relative motion events
     // A full implementation would track current position and emit deltas
-    emit_relative(RelativeAxisType::REL_X, x as i32)?;
-    emit_relative(RelativeAxisType::REL_Y, y as i32)?;
+    emit_relative(RelativeAxisType::REL_X, delta_x as i32)?;
+    emit_relative(RelativeAxisType::REL_Y, delta_y as i32)?;
     Ok(())
 }
 

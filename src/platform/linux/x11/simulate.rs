@@ -3,6 +3,7 @@
 use crate::error::{Error, Result};
 use crate::event::{Button, Event, EventType};
 use crate::keycode::Key;
+use crate::platform::motion::{Motion, motion_from_event};
 use std::os::raw::{c_int, c_ulong};
 use std::ptr::null;
 use std::sync::{Mutex, MutexGuard};
@@ -12,6 +13,16 @@ use crate::platform::linux::keycodes::key_to_keycode;
 
 const TRUE: c_int = 1;
 const FALSE: c_int = 0;
+
+unsafe extern "C" {
+    #[link_name = "XTestFakeRelativeMotionEvent"]
+    fn x_test_fake_relative_motion_event(
+        display: *mut xlib::Display,
+        delta_x: c_int,
+        delta_y: c_int,
+        delay: c_ulong,
+    ) -> c_int;
+}
 
 struct XTestInjector {
     display: *mut xlib::Display,
@@ -155,11 +166,13 @@ pub fn simulate(event: &Event) -> Result<()> {
                 mouse_release(button)?;
             }
         }
-        EventType::MouseMoved | EventType::MouseDragged => {
-            if let Some(mouse) = &event.mouse {
-                mouse_move(mouse.x, mouse.y)?;
+        EventType::MouseMoved | EventType::MouseDragged => match motion_from_event(event) {
+            Some(Motion::Absolute { x, y }) => mouse_move(x, y)?,
+            Some(Motion::Relative { delta_x, delta_y }) => {
+                mouse_move_relative(delta_x, delta_y)?;
             }
-        }
+            None => {}
+        },
         EventType::MouseWheel => {
             if let Some(wheel) = &event.wheel {
                 mouse_scroll(wheel.delta as i32, 0)?;
@@ -256,18 +269,20 @@ pub fn mouse_click(button: Button) -> Result<()> {
 
 /// Move the mouse to a position.
 pub fn mouse_move(x: f64, y: f64) -> Result<()> {
-    let x_int = if x.is_finite() {
-        x.clamp(c_int::MIN as f64, c_int::MAX as f64).round() as c_int
-    } else {
-        0
-    };
-    let y_int = if y.is_finite() {
-        y.clamp(c_int::MIN as f64, c_int::MAX as f64).round() as c_int
-    } else {
-        0
-    };
+    replay_motion(finite_rounded_c_int(x), finite_rounded_c_int(y))
+}
 
-    replay_motion(x_int, y_int)
+/// Move the mouse by a relative offset.
+pub fn mouse_move_relative(delta_x: f64, delta_y: f64) -> Result<()> {
+    replay_relative_motion(finite_rounded_c_int(delta_x), finite_rounded_c_int(delta_y))
+}
+
+fn finite_rounded_c_int(value: f64) -> c_int {
+    if value.is_finite() {
+        value.clamp(c_int::MIN as f64, c_int::MAX as f64).round() as c_int
+    } else {
+        0
+    }
 }
 
 /// Replay absolute pointer motion while an active grab is temporarily released.
@@ -278,6 +293,22 @@ pub(super) fn replay_motion(x: c_int, y: c_int) -> Result<()> {
 
         if result == 0 {
             Err(Error::SimulateFailed("XTestFakeMotionEvent failed".into()))
+        } else {
+            Ok(())
+        }
+    })
+}
+
+/// Replay relative pointer motion while preserving the XTest client identity.
+pub(super) fn replay_relative_motion(delta_x: c_int, delta_y: c_int) -> Result<()> {
+    with_injector(|display| {
+        let result = unsafe { x_test_fake_relative_motion_event(display, delta_x, delta_y, 0) };
+        unsafe { xlib::XSync(display, FALSE) };
+
+        if result == 0 {
+            Err(Error::SimulateFailed(
+                "XTestFakeRelativeMotionEvent failed".into(),
+            ))
         } else {
             Ok(())
         }
@@ -324,4 +355,28 @@ pub fn mouse_scroll(delta_y: i32, delta_x: i32) -> Result<()> {
             Err(Error::SimulateFailed("XTestFakeButtonEvent failed".into()))
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::finite_rounded_c_int;
+    use std::os::raw::c_int;
+
+    #[test]
+    fn motion_coordinate_rounds_finite_values() {
+        assert_eq!(finite_rounded_c_int(4.6), 5);
+        assert_eq!(finite_rounded_c_int(-4.6), -5);
+    }
+
+    #[test]
+    fn motion_coordinate_normalizes_non_finite_values() {
+        assert_eq!(finite_rounded_c_int(f64::NAN), 0);
+        assert_eq!(finite_rounded_c_int(f64::INFINITY), 0);
+    }
+
+    #[test]
+    fn motion_coordinate_clamps_to_x11_integer_range() {
+        assert_eq!(finite_rounded_c_int(f64::MAX), c_int::MAX);
+        assert_eq!(finite_rounded_c_int(f64::MIN), c_int::MIN);
+    }
 }

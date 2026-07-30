@@ -3,6 +3,7 @@
 use crate::error::{Error, Result};
 use crate::event::{Button, Event, EventType};
 use crate::keycode::Key;
+use crate::platform::motion::{Motion, motion_from_event};
 use std::mem::size_of;
 use windows::Win32::Foundation::POINT;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
@@ -125,11 +126,13 @@ pub fn simulate(event: &Event) -> Result<()> {
                 mouse_release(button)?;
             }
         }
-        EventType::MouseMoved | EventType::MouseDragged => {
-            if let Some(mouse) = &event.mouse {
-                mouse_move(mouse.x, mouse.y)?;
+        EventType::MouseMoved | EventType::MouseDragged => match motion_from_event(event) {
+            Some(Motion::Absolute { x, y }) => mouse_move(x, y)?,
+            Some(Motion::Relative { delta_x, delta_y }) => {
+                mouse_move_relative(delta_x, delta_y)?;
             }
-        }
+            None => {}
+        },
         EventType::MouseWheel => {
             if let Some(wheel) = &event.wheel {
                 mouse_scroll(wheel.delta as i32, 0)?;
@@ -210,6 +213,12 @@ pub fn mouse_move(x: f64, y: f64) -> Result<()> {
         normalized_x,
         normalized_y,
     )
+}
+
+/// Move the mouse by a relative offset.
+pub fn mouse_move_relative(delta_x: f64, delta_y: f64) -> Result<()> {
+    let (x, y) = mouse_position()?;
+    mouse_move(x + delta_x, y + delta_y)
 }
 
 /// Scroll the mouse wheel.

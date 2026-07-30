@@ -149,6 +149,12 @@ mod stub {
         ))
     }
 
+    pub fn mouse_move_relative(_delta_x: f64, _delta_y: f64) -> Result<()> {
+        Err(Error::NotSupported(
+            "No Linux backend enabled. Enable 'x11' or 'evdev' feature.".into(),
+        ))
+    }
+
     pub fn displays() -> Result<Vec<DisplayInfo>> {
         Err(Error::NotSupported(
             "No Linux backend enabled. Enable 'x11' or 'evdev' feature.".into(),

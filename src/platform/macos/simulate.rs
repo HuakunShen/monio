@@ -5,6 +5,7 @@
 use crate::error::{Error, Result};
 use crate::event::{Button, Event, EventType};
 use crate::keycode::Key;
+use crate::platform::motion::{Motion, motion_from_event};
 use objc2_core_foundation::CGPoint;
 use objc2_core_graphics::{
     CGEvent, CGEventField, CGEventFlags, CGEventSource, CGEventSourceStateID, CGEventTapLocation,
@@ -82,11 +83,13 @@ pub fn simulate(event: &Event) -> Result<()> {
                 mouse_release(button)?;
             }
         }
-        EventType::MouseMoved | EventType::MouseDragged => {
-            if let Some(mouse) = &event.mouse {
-                mouse_move(mouse.x, mouse.y)?;
+        EventType::MouseMoved | EventType::MouseDragged => match motion_from_event(event) {
+            Some(Motion::Absolute { x, y }) => mouse_move(x, y)?,
+            Some(Motion::Relative { delta_x, delta_y }) => {
+                mouse_move_relative(delta_x, delta_y)?;
             }
-        }
+            None => {}
+        },
         EventType::MouseWheel => {
             if let Some(wheel) = &event.wheel {
                 mouse_scroll(wheel.delta as i32, 0)?;
@@ -311,6 +314,12 @@ pub fn mouse_move(x: f64, y: f64) -> Result<()> {
         post_event(&event)?;
     }
     Ok(())
+}
+
+/// Move the mouse by a relative offset.
+pub fn mouse_move_relative(delta_x: f64, delta_y: f64) -> Result<()> {
+    let (x, y) = mouse_position()?;
+    mouse_move(x + delta_x, y + delta_y)
 }
 
 /// Scroll the mouse wheel.
