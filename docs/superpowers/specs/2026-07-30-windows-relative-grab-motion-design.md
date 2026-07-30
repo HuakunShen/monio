@@ -2,7 +2,7 @@
 
 Date: 2026-07-30
 
-Status: Approved for planning
+Status: Implemented; physical Windows edge/pass-through acceptance pending
 
 ## Product context
 
@@ -397,6 +397,22 @@ cargo doc --all-features --no-deps
 
 The existing `synthetic_input_detection` example must continue to recognize
 ordinary Monio key and pointer injection as `ThisMonioSession`.
+
+Implementation checks completed on Windows:
+
+```text
+cargo test platform::windows
+cargo test --example windows_relative_grab_detection
+cargo check --example windows_relative_grab_detection
+cargo clippy --all-features --all-targets -- -D warnings
+```
+
+The first native pass-through diagnostic reached `HookEnabled` and
+`Grab released: true`, proving startup and normal cleanup on this host. It
+observed no physical movement during the ten-second window and intentionally
+failed with `no physical relative motion was observed`. Physical direction,
+drag, screen-edge continuity, consume suppression, and one-to-one
+pass-through therefore remain pending.
 
 ## Long-term CrossFlow lifecycle
 

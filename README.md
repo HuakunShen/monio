@@ -152,6 +152,32 @@ fn main() {
 | Linux/X11     | ✅ Active    | XGrab + XI2 RawMotion with XTest pass-through       |
 | Linux/Wayland | ⚠️ Limited   | See [Wayland Limitation](#wayland-limitation) below |
 
+On Windows, ordinary `listen()` keeps reporting absolute motion with
+`mouse.relative == None`. During `grab()`, Monio combines
+`WH_KEYBOARD_LL`/`WH_MOUSE_LL` suppression with mouse Raw Input. Conventional
+relative mice and touchpads therefore report absolute `x`/`y` plus unclipped
+raw deltas in `mouse.relative`; `MouseDragged` still follows held-button
+state. Passing such an event replays the captured delta with privately tagged
+relative `SendInput`, while consuming it leaves the local pointer suppressed.
+`mouse_move_relative()` also uses native signed relative `SendInput`.
+
+Windows Raw Input registration is process-global per device class. A grab
+temporarily owns this process's mouse registration and restores the prior
+registration on exit; it does not take Raw Input away from other processes.
+Use the physical diagnostic for screen-edge, drag, and local pass-through
+acceptance:
+
+```powershell
+cargo run --example windows_relative_grab_detection -- --pass-through
+```
+
+For a CrossFlow/Synergy-style product, run the native Rust agent in every
+logged-in interactive user session, not as an interactive session-0 service.
+Windows hooks are scoped to a desktop/session, `SendInput` is limited by UIPI
+against higher-integrity targets, and lock/UAC secure desktops are outside the
+normal desktop capture path. The product must treat those transitions as
+explicit release/reconnect states.
+
 On Linux/X11, ordinary `listen()` keeps reporting absolute motion.
 `grab()` requires XI2 2.1+ and attaches raw relative deltas to
 `mouse.relative`. Those deltas come from XI2 raw motion rather than being

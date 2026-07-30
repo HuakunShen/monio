@@ -213,15 +213,20 @@ Relevant files:
 
 - `src/platform/windows/provenance.rs`;
 - `src/platform/windows/listen.rs`;
+- `src/platform/windows/raw_input.rs`;
 - `src/platform/windows/simulate.rs`;
-- `examples/synthetic_input_detection.rs`.
+- `examples/synthetic_input_detection.rs`;
+- `examples/windows_relative_grab_detection.rs`.
 
-Windows initializes one random, nonzero 32-bit process-session tag. Every
-keyboard and mouse `SendInput` record stores it in `dwExtraInfo`. Low-level
-keyboard and mouse hooks preserve `dwExtraInfo` plus the injected flags and
-report `ThisMonioSession` only when the exact active tag matches and
-`LLKHF_INJECTED` or `LLMHF_INJECTED` is present. Zero, mismatched, untagged, and
-other-injector events remain `Unknown`.
+Windows initializes two distinct random, nonzero 32-bit process-session tags:
+one for public Monio injection and one private grab-replay tag. Every keyboard
+and mouse `SendInput` record stores the appropriate tag in `dwExtraInfo`.
+Low-level keyboard and mouse hooks preserve `dwExtraInfo` plus the injected
+flags and report `ThisMonioSession` only when an exact active tag matches and
+`LLKHF_INJECTED` or `LLMHF_INJECTED` is present. Zero, mismatched, untagged,
+and other-injector events remain `Unknown`. Only the private replay tag
+bypasses grab-handler dispatch; ordinary Monio simulation remains observable
+to the handler.
 
 Primary references:
 
@@ -237,6 +242,109 @@ target, and mouse restoration as `ThisMonioSession`. Implementation commit:
 ```text
 4f7ce57d7d4bae60fc711bf16cb1c01355a66844
 ```
+
+### Windows relative grab implementation
+
+Ordinary Windows `listen()` still reports absolute pointer motion with
+`MouseData::relative == None`. During `grab()`, Monio combines two Windows
+input paths:
+
+1. `WH_MOUSE_LL` suppresses physical legacy movement, records its projected
+   absolute point, handles buttons and wheels, and retains injected-event
+   provenance;
+2. a message-only window receives `WM_INPUT` and decodes relative
+   `RAWMOUSE::lLastX/lLastY`;
+3. one physical relative sample constructs exactly one `MouseMoved` or
+   `MouseDragged` handler event containing both absolute `x/y` and raw
+   `delta_x/delta_y`;
+4. `None` consumes that motion; `Some` replays the original raw delta through
+   privately tagged relative `SendInput`;
+5. the low-level hook recognizes that private replay and passes it without
+   recursively invoking the grab handler; and
+6. `GetCurrentInputMessageSource` filters injected Raw Input because injected
+   movement remains on the provenance-aware low-level-hook path.
+
+`mouse_move_relative()` now sends signed relative `MOUSEEVENTF_MOVE` directly
+instead of reading the cursor and converting the result into an absolute
+move. Finite deltas are rounded and clamped to the Win32 signed integer range;
+non-finite values become zero.
+
+Raw Input registration is singleton per device class within a process, not
+across the desktop. Windows grab snapshots this process's Generic Desktop
+mouse registration, temporarily points it at Monio's message-only window, and
+restores it only if Monio still owns the registration during cleanup. A second
+Monio Windows hook/grab session is rejected with `AlreadyRunning`, preventing
+the process-global handlers and registration from being overwritten.
+
+The focused implementation checks passed on Windows:
+
+```powershell
+cargo test platform::windows
+cargo test --example windows_relative_grab_detection
+cargo check --example windows_relative_grab_detection
+cargo clippy --all-features --all-targets -- -D warnings
+```
+
+The first native pass-through invocation:
+
+```powershell
+cargo run --example windows_relative_grab_detection -- --pass-through
+```
+
+successfully registered the hook and Raw Input receiver, emitted
+`HookEnabled`, timed out normally, restored local control, and reported
+`Grab released: true`. No physical mouse motion occurred during its ten-second
+window, so the diagnostic correctly exited unsuccessfully with
+`no physical relative motion was observed`.
+
+The following physical observations therefore remain pending and must not be
+inferred from `SendInput`:
+
+- nonzero positive and negative X/Y raw deltas from a conventional mouse;
+- `MouseDragged` while a physical button is held;
+- continued deltas while repeatedly pushing against every screen edge;
+- consume mode keeping the local pointer stationary;
+- pass-through feeling one-to-one without doubling, feedback, or jumps.
+
+### Windows feasibility for CrossFlow
+
+A standalone Rust agent is feasible for the ordinary Windows interactive
+desktop. The `windows` crate exposes all APIs used here, so this capture path
+does not require a C#, C++, or service helper. CrossFlow should run one native
+agent in each logged-in interactive user session and keep low-level hook
+callbacks limited to enqueueing/local decisions; network I/O must happen
+outside those timeout-sensitive callbacks.
+
+Hard Windows boundaries remain:
+
+- an interactive service in session 0 cannot capture the logged-in user's
+  desktop; a service may supervise, but the input agent must run in the user
+  session;
+- low-level hooks apply to the installing thread's desktop/session, not every
+  concurrent login or secure desktop;
+- `SendInput` is subject to User Interface Privilege Isolation (UIPI), so a
+  normal-integrity agent cannot control a higher-integrity application;
+- UAC secure desktop, lock screen, sign-in desktop, and secure-attention
+  sequence are outside the normal capture/injection path.
+
+Separate repository/product work is still required before claiming a complete
+Windows CrossFlow implementation:
+
+- preserve keyboard scan code and extended-key identity and validate layout,
+  dead-key, IME, AltGr, autorepeat, and layout-mismatch behavior;
+- preserve vertical versus horizontal wheel direction during generic
+  `simulate()` replay;
+- add an asynchronous startup handshake so `Hook::run_async` and
+  `Hook::grab_async` can return backend startup errors directly;
+- have the CrossFlow state machine release remotely held keys/buttons on
+  disconnect, timeout, target switch, lock, and process exit.
+
+The native product acceptance matrix must also cover mixed-DPI
+multi-monitor layouts, negative virtual-screen coordinates, 1000 Hz or faster
+mice, elevated target applications, RDP, fast user switching, lock/unlock,
+sleep/resume, network disconnect, and process crash. These items do not block
+the Rust architecture, but they prevent describing the entire Windows product
+as finished.
 
 ## Linux X11 handoff
 

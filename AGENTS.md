@@ -39,6 +39,7 @@ cargo run --example drag_detection     # MouseDragged vs MouseMoved demo
 cargo run --example grab               # block specific keys
 cargo run --example simulate           # synthesize input
 cargo run --example synthetic_input_detection # verify macOS/Windows self-injection provenance
+cargo run --example windows_relative_grab_detection -- --pass-through # Windows physical Raw Input diagnostic
 cargo run --features x11 --example x11_grab_detection # native X11 grab diagnostic
 cargo run --features x11 --example x11_relative_grab_detection # XI2 relative-motion diagnostic
 cargo run --example mouse_position     # query cursor position
@@ -136,7 +137,15 @@ This shared contract is what lets `Hook`, `channel::*`, `EventRecorder`, and `St
 
 **macOS**: Uses `objc2-core-graphics` for CGEventTap. The `#![allow(unsafe_op_in_unsafe_fn)]` directive is needed for Rust 2024 edition compatibility with the objc2 APIs. Full grab support. Requires Accessibility permissions.
 
-**Windows**: Uses the `windows` crate with low-level hooks (`WH_KEYBOARD_LL`, `WH_MOUSE_LL`). Full grab support. No special permissions for hooking; simulation may need Administrator in some contexts.
+**Windows**: Uses `WH_KEYBOARD_LL`/`WH_MOUSE_LL` for global event suppression,
+buttons, wheels, and injection provenance. During `grab()`, a message-only
+window receives `WM_INPUT` raw relative mouse motion; ordinary `listen()`
+remains absolute-only. Grab pass-through uses a private tagged `SendInput`
+replay that bypasses handler recursion. Mouse Raw Input registration is
+process-global per device class, so grab snapshots, temporarily replaces, and
+restores this process's prior mouse registration. No special permissions are
+needed for ordinary hooks, but `SendInput` cannot inject into a higher
+integrity target under UIPI.
 
 **Linux**: X11 uses XRecord for absolute-only listening, active
 `XGrabKeyboard`/`XGrabPointer` sessions plus XI2 RawMotion for `grab()`, and
