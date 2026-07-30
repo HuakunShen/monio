@@ -3,6 +3,7 @@
 use crate::error::{Error, Result};
 use crate::event::Event;
 use crate::platform;
+use crate::pointer_capture;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::thread::JoinHandle;
@@ -120,7 +121,7 @@ impl Hook {
         let result = platform::run_hook(&self.running, handler);
 
         self.running.store(false, Ordering::SeqCst);
-        result
+        pointer_capture::finish_hook_result(result)
     }
 
     /// Start listening in a background thread (non-blocking, listen-only mode).
@@ -137,7 +138,10 @@ impl Hook {
 
         let running = self.running.clone();
         let handle = std::thread::spawn(move || {
-            let _ = platform::run_hook(&running, handler);
+            let result = platform::run_hook(&running, handler);
+            if let Err(error) = pointer_capture::finish_hook_result(result) {
+                log::error!("input hook stopped with an error: {error}");
+            }
             running.store(false, Ordering::SeqCst);
         });
 
@@ -170,7 +174,7 @@ impl Hook {
         let result = platform::run_grab_hook(&self.running, handler);
 
         self.running.store(false, Ordering::SeqCst);
-        result
+        pointer_capture::finish_hook_result(result)
     }
 
     /// Start grabbing events in a background thread (non-blocking).
@@ -187,7 +191,10 @@ impl Hook {
 
         let running = self.running.clone();
         let handle = std::thread::spawn(move || {
-            let _ = platform::run_grab_hook(&running, handler);
+            let result = platform::run_grab_hook(&running, handler);
+            if let Err(error) = pointer_capture::finish_hook_result(result) {
+                log::error!("input grab hook stopped with an error: {error}");
+            }
             running.store(false, Ordering::SeqCst);
         });
 
@@ -201,16 +208,21 @@ impl Hook {
             return Err(Error::NotRunning);
         }
 
-        platform::stop_hook()?;
-
-        // Wait for the thread to finish if running async
-        if let Some(handle) = self.thread_handle.write().unwrap().take() {
-            handle
-                .join()
-                .map_err(|_| Error::ThreadError("failed to join hook thread".into()))?;
+        let stop_result = platform::stop_hook();
+        if let Err(error) = stop_result {
+            return pointer_capture::finish_hook_result(Err(error));
         }
 
-        Ok(())
+        // Wait for the thread to finish if running async
+        let join_result = if let Some(handle) = self.thread_handle.write().unwrap().take() {
+            handle
+                .join()
+                .map_err(|_| Error::ThreadError("failed to join hook thread".into()))
+        } else {
+            Ok(())
+        };
+
+        pointer_capture::finish_hook_result(join_result)
     }
 
     /// Check if the hook is currently running.

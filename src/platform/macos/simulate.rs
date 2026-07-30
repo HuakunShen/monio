@@ -6,7 +6,7 @@ use crate::error::{Error, Result};
 use crate::event::{Button, Event, EventType};
 use crate::keycode::Key;
 use crate::platform::motion::{Motion, motion_from_event};
-use objc2_core_foundation::CGPoint;
+use objc2_core_foundation::{CFRetained, CGPoint};
 use objc2_core_graphics::{
     CGEvent, CGEventField, CGEventFlags, CGEventSource, CGEventSourceStateID, CGEventTapLocation,
     CGEventType, CGMouseButton, CGScrollEventUnit,
@@ -38,6 +38,38 @@ fn get_current_mouse_location() -> Result<CGPoint> {
         let event = CGEvent::new(Some(&source))
             .ok_or_else(|| Error::SimulateFailed("Failed to create event".into()))?;
         Ok(CGEvent::location(Some(&event)))
+    }
+}
+
+fn create_mouse_move_event(
+    point: CGPoint,
+    relative: Option<(f64, f64)>,
+) -> Result<CFRetained<CGEvent>> {
+    unsafe {
+        let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+            .ok_or_else(|| Error::SimulateFailed("Failed to create event source".into()))?;
+        let event = CGEvent::new_mouse_event(
+            Some(&source),
+            CGEventType::MouseMoved,
+            point,
+            CGMouseButton::Left,
+        )
+        .ok_or_else(|| Error::SimulateFailed("Failed to create mouse event".into()))?;
+
+        if let Some((delta_x, delta_y)) = relative {
+            CGEvent::set_integer_value_field(
+                Some(&event),
+                CGEventField::MouseEventDeltaX,
+                delta_x as i64,
+            );
+            CGEvent::set_integer_value_field(
+                Some(&event),
+                CGEventField::MouseEventDeltaY,
+                delta_y as i64,
+            );
+        }
+
+        Ok(event)
     }
 }
 
@@ -298,28 +330,21 @@ pub fn mouse_click(button: Button) -> Result<()> {
 
 /// Move the mouse to a position.
 pub fn mouse_move(x: f64, y: f64) -> Result<()> {
-    let point = CGPoint { x, y };
-
-    unsafe {
-        let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
-            .ok_or_else(|| Error::SimulateFailed("Failed to create event source".into()))?;
-        let event = CGEvent::new_mouse_event(
-            Some(&source),
-            CGEventType::MouseMoved,
-            point,
-            CGMouseButton::Left,
-        )
-        .ok_or_else(|| Error::SimulateFailed("Failed to create mouse event".into()))?;
-
-        post_event(&event)?;
-    }
-    Ok(())
+    let event = create_mouse_move_event(CGPoint { x, y }, None)?;
+    post_event(&event)
 }
 
 /// Move the mouse by a relative offset.
 pub fn mouse_move_relative(delta_x: f64, delta_y: f64) -> Result<()> {
     let (x, y) = mouse_position()?;
-    mouse_move(x + delta_x, y + delta_y)
+    let event = create_mouse_move_event(
+        CGPoint {
+            x: x + delta_x,
+            y: y + delta_y,
+        },
+        Some((delta_x, delta_y)),
+    )?;
+    post_event(&event)
 }
 
 /// Scroll the mouse wheel.
@@ -340,4 +365,28 @@ pub fn mouse_scroll(delta_y: i32, delta_x: i32) -> Result<()> {
         post_event(&event)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn relative_mouse_event_keeps_absolute_target_and_delta_fields() {
+        let event = create_mouse_move_event(CGPoint { x: 120.0, y: 240.0 }, Some((-9.0, 6.0)))
+            .expect("mouse CGEvent should be available");
+
+        assert_eq!(
+            CGEvent::location(Some(&event)),
+            CGPoint { x: 120.0, y: 240.0 }
+        );
+        assert_eq!(
+            CGEvent::integer_value_field(Some(&event), CGEventField::MouseEventDeltaX,),
+            -9
+        );
+        assert_eq!(
+            CGEvent::integer_value_field(Some(&event), CGEventField::MouseEventDeltaY,),
+            6
+        );
+    }
 }

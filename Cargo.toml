@@ -104,6 +104,10 @@ name = "windows_relative_grab_detection"
 path = "examples/windows_relative_grab_detection.rs"
 
 [[example]]
+name = "crossflow_relative_capture"
+path = "examples/crossflow_relative_capture.rs"
+
+[[example]]
 name = "wayland_input_capture_detection"
 path = "examples/wayland_input_capture_detection.rs"
 required-features = ["wayland-portal", "x11"]

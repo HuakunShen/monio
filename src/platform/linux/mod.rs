@@ -49,6 +49,14 @@
 
 mod keycodes;
 
+pub(crate) fn begin_relative_pointer_capture() -> crate::Result<()> {
+    Ok(())
+}
+
+pub(crate) fn end_relative_pointer_capture() -> crate::Result<()> {
+    Ok(())
+}
+
 #[cfg(feature = "x11")]
 mod x11;
 

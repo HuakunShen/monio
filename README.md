@@ -12,6 +12,7 @@ A pure Rust cross-platform input hook library with **proper drag detection**.
   HarmonyOS PC/2in1 backend
 - **Proper drag detection**: Distinguishes `MouseDragged` from `MouseMoved` events
 - **Event grabbing**: Block events from reaching other applications (global hotkeys)
+- **Remote pointer capture**: Explicitly decouple macOS mouse motion from the local cursor
 - **Async/Channel support**: Non-blocking event receiving with std or tokio channels
 - **Event recording & playback**: Record and replay macros (requires `recorder` feature)
 - **Input statistics**: Analyze typing speed, mouse distance, etc. (requires `statistics` feature)
@@ -468,9 +469,72 @@ hypotheses, and native experiment requirements, see
 
 ## Platform Notes
 
+### Cross-platform relative pointer API
+
+CrossFlow can consume one event shape without platform-specific branches:
+
+```rust
+if let Some(mouse) = &event.mouse
+    && let Some(relative) = mouse.relative
+{
+    route_pointer_delta(relative.delta_x, relative.delta_y);
+}
+```
+
+`MouseData::x/y` remain available as absolute compatibility coordinates.
+macOS `listen()` and `grab()`, Linux evdev, and Linux X11 `grab()` populate
+`MouseData::relative`. Linux X11 `listen()` and the current Windows low-level
+hook leave it as `None`. `mouse_move_relative()` is the matching
+platform-neutral injection API.
+
+For a remote-active CrossFlow source, own cursor decoupling separately from the
+hook:
+
+```rust
+use monio::{Event, EventType, Hook, RelativePointerCapture};
+
+let capture = RelativePointerCapture::acquire()?;
+let hook = Hook::new();
+hook.grab_async(|event: &Event| {
+    if matches!(event.event_type, EventType::MouseMoved | EventType::MouseDragged)
+        && let Some(relative) = event.mouse.as_ref().and_then(|mouse| mouse.relative)
+    {
+        route_pointer_delta(relative.delta_x, relative.delta_y);
+    }
+
+    None // the active remote route owns local input
+})?;
+
+// When the route returns local:
+capture.release()?;
+hook.stop()?;
+# Ok::<(), monio::Error>(())
+# fn route_pointer_delta(_: f64, _: f64) {}
+```
+
+`RelativePointerCapture` is process-exclusive and RAII-based. On macOS it
+saves the cursor position, hides the cursor, and disassociates physical mouse
+motion from the visible cursor. Explicit release, `Drop`, and hook/channel
+shutdown all attempt to re-associate, restore, and show the cursor. Generic
+`grab()` never enables this behavior implicitly.
+
+On Linux the lease is a no-op: X11 `grab()` already obtains XI2 RawMotion and
+evdev already receives kernel `REL_X/REL_Y`. The lease does not start a hook;
+the caller still chooses the appropriate capture backend. On Windows
+acquisition returns `Error::NotSupported` because the current low-level hook
+does not expose cursor-independent deltas; Raw Input remains future work.
+
+See `examples/crossflow_relative_capture.rs` for a bounded diagnostic that
+automatically restores local input after five seconds.
+
 ### macOS
 
-Requires **Accessibility permissions**. The app will prompt for permission on first run, or you can grant it manually in System Preferences → Security & Privacy → Privacy → Accessibility.
+Requires **Accessibility permissions**. Mouse motion retains the Core Graphics
+absolute location and publishes `MouseEventDeltaX/Y` through
+`MouseData::relative`. Relative injection retains its absolute target and sets
+the same delta fields. `RelativePointerCapture` provides the explicit
+cursor-disassociation lifecycle needed by an unbounded CrossFlow capture
+session; it is not activated by generic `grab()`.
 
 ### Windows
 
@@ -529,6 +593,9 @@ another computer.
 # Use evdev backend (for Wayland support)
 cargo build --features evdev --no-default-features
 ```
+
+evdev coalesces `REL_X/REL_Y` from one `SYN_REPORT` frame into one Monio
+movement event with both tracked absolute `x/y` and `MouseData::relative`.
 
 **evdev permissions**: Requires membership in the `input` group and access to
 `/dev/uinput`. The injector is created before capture so its exact identity is

@@ -9,13 +9,14 @@ use crate::error::{Error, Result};
 use crate::event::{Button, Event, InputOrigin, ScrollDirection};
 use crate::hook::{EventHandler, GrabHandler};
 use crate::platform::linux::evdev::provenance::InjectorDeviceIdentity;
-use crate::platform::linux::evdev::simulate::{emit_event, initialize};
+use crate::platform::linux::evdev::simulate::{emit_event, emit_relative_motion, initialize};
 use crate::platform::linux::keycodes::evdev_keycode_to_key;
+use crate::platform::motion::{RelativeMotionFrame, RelativeMotionSample};
 use crate::state::{
     self, MASK_ALT, MASK_BUTTON1, MASK_BUTTON2, MASK_BUTTON3, MASK_BUTTON4, MASK_BUTTON5,
     MASK_CTRL, MASK_META, MASK_SHIFT,
 };
-use evdev::{Device, EventType as EvdevEventType, InputEventKind};
+use evdev::{Device, EventType as EvdevEventType, InputEventKind, Synchronization};
 use std::fs;
 use std::os::unix::io::AsRawFd;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -71,6 +72,18 @@ fn code_to_mask(code: u16) -> u32 {
 struct CapturedDevice {
     device: Device,
     origin: InputOrigin,
+    relative_motion: RelativeMotionFrame,
+}
+
+enum ConvertedInput {
+    Immediate(Event),
+    RelativePending,
+    RelativeFrame {
+        event: Event,
+        motion: RelativeMotionSample,
+    },
+    Discarded,
+    Ignored,
 }
 
 /// Enumerate all input devices while retaining exact injector identity.
@@ -114,7 +127,11 @@ fn enumerate_devices(
                             || supported.contains(EvdevEventType::RELATIVE)
                         {
                             found_session_injector |= is_session_injector;
-                            devices.push(CapturedDevice { device, origin });
+                            devices.push(CapturedDevice {
+                                device,
+                                origin,
+                                relative_motion: RelativeMotionFrame::default(),
+                            });
                         }
                     }
                     Err(e) => {
@@ -308,8 +325,14 @@ where
                 let origin = captured.origin;
                 if let Ok(events) = captured.device.fetch_events() {
                     for ev in events {
-                        if let Some(event) = convert_event(&ev, origin) {
-                            callback(&event);
+                        match convert_event(&ev, origin, &mut captured.relative_motion) {
+                            ConvertedInput::Immediate(event)
+                            | ConvertedInput::RelativeFrame { event, .. } => {
+                                callback(&event);
+                            }
+                            ConvertedInput::RelativePending
+                            | ConvertedInput::Discarded
+                            | ConvertedInput::Ignored => {}
                         }
                     }
                 }
@@ -366,17 +389,32 @@ where
                 let origin = captured.origin;
                 if let Ok(events) = captured.device.fetch_events() {
                     for ev in events {
-                        let pass_through = if let Some(event) = convert_event(&ev, origin) {
-                            callback(&event)
-                        } else {
-                            // Unknown event type - pass through
-                            true
-                        };
-
-                        if pass_through {
-                            // Re-inject the original event via uinput
-                            if let Err(e) = emit_event(&ev) {
-                                log::debug!("Failed to re-inject event: {}", e);
+                        match convert_event(&ev, origin, &mut captured.relative_motion) {
+                            ConvertedInput::Immediate(event) => {
+                                if callback(&event)
+                                    && let Err(error) = emit_event(&ev)
+                                {
+                                    log::debug!("Failed to re-inject event: {}", error);
+                                }
+                            }
+                            ConvertedInput::RelativePending => {}
+                            ConvertedInput::RelativeFrame { event, motion } => {
+                                if callback(&event)
+                                    && let Err(error) =
+                                        emit_relative_motion(motion.delta_x, motion.delta_y)
+                                {
+                                    log::debug!(
+                                        "Failed to re-inject relative motion frame: {}",
+                                        error
+                                    );
+                                }
+                            }
+                            ConvertedInput::Discarded => {}
+                            ConvertedInput::Ignored => {
+                                // Unknown event type - pass through.
+                                if let Err(error) = emit_event(&ev) {
+                                    log::debug!("Failed to re-inject event: {}", error);
+                                }
                             }
                         }
                     }
@@ -389,24 +427,36 @@ where
 }
 
 /// Convert evdev InputEvent to our Event type
-fn convert_event(ev: &evdev::InputEvent, origin: InputOrigin) -> Option<Event> {
-    let mut event = match ev.kind() {
+fn convert_event(
+    ev: &evdev::InputEvent,
+    origin: InputOrigin,
+    relative_motion: &mut RelativeMotionFrame,
+) -> ConvertedInput {
+    let event = match ev.kind() {
         InputEventKind::Key(key) => {
             let code = key.code();
             let pressed = ev.value() == 1;
 
             // Check if it's a mouse button
             if (0x110..=0x117).contains(&code) {
-                let button = code_to_button(code)?;
+                let Some(button) = code_to_button(code) else {
+                    return ConvertedInput::Ignored;
+                };
                 let mask = code_to_mask(code);
 
                 if pressed {
                     state::set_mask(mask);
-                    let (x, y) = *MOUSE_POS.lock().ok()?;
+                    let Ok(position) = MOUSE_POS.lock() else {
+                        return ConvertedInput::Ignored;
+                    };
+                    let (x, y) = *position;
                     Some(Event::mouse_pressed(button, x, y))
                 } else {
                     state::unset_mask(mask);
-                    let (x, y) = *MOUSE_POS.lock().ok()?;
+                    let Ok(position) = MOUSE_POS.lock() else {
+                        return ConvertedInput::Ignored;
+                    };
+                    let (x, y) = *position;
                     Some(Event::mouse_released(button, x, y))
                 }
             } else {
@@ -425,41 +475,47 @@ fn convert_event(ev: &evdev::InputEvent, origin: InputOrigin) -> Option<Event> {
         InputEventKind::RelAxis(axis) => {
             use evdev::RelativeAxisType;
 
-            let mut pos = MOUSE_POS.lock().ok()?;
-            let value = ev.value() as f64;
+            let Ok(mut pos) = MOUSE_POS.lock() else {
+                return ConvertedInput::Ignored;
+            };
+            let value = ev.value();
 
             match axis {
                 RelativeAxisType::REL_X => {
-                    pos.0 += value;
-                    if state::is_button_held() {
-                        Some(Event::mouse_dragged(pos.0, pos.1))
-                    } else {
-                        Some(Event::mouse_moved(pos.0, pos.1))
-                    }
+                    pos.0 += value as f64;
+                    relative_motion.record(value, 0, state::is_button_held());
+                    return ConvertedInput::RelativePending;
                 }
                 RelativeAxisType::REL_Y => {
-                    pos.1 += value;
-                    if state::is_button_held() {
-                        Some(Event::mouse_dragged(pos.0, pos.1))
-                    } else {
-                        Some(Event::mouse_moved(pos.0, pos.1))
-                    }
+                    pos.1 += value as f64;
+                    relative_motion.record(0, value, state::is_button_held());
+                    return ConvertedInput::RelativePending;
                 }
                 RelativeAxisType::REL_WHEEL => {
-                    let direction = if value > 0.0 {
+                    let direction = if value > 0 {
                         ScrollDirection::Up
                     } else {
                         ScrollDirection::Down
                     };
-                    Some(Event::mouse_wheel(pos.0, pos.1, direction, value.abs()))
+                    Some(Event::mouse_wheel(
+                        pos.0,
+                        pos.1,
+                        direction,
+                        value.unsigned_abs() as f64,
+                    ))
                 }
                 RelativeAxisType::REL_HWHEEL => {
-                    let direction = if value > 0.0 {
+                    let direction = if value > 0 {
                         ScrollDirection::Right
                     } else {
                         ScrollDirection::Left
                     };
-                    Some(Event::mouse_wheel(pos.0, pos.1, direction, value.abs()))
+                    Some(Event::mouse_wheel(
+                        pos.0,
+                        pos.1,
+                        direction,
+                        value.unsigned_abs() as f64,
+                    ))
                 }
                 _ => None,
             }
@@ -468,7 +524,9 @@ fn convert_event(ev: &evdev::InputEvent, origin: InputOrigin) -> Option<Event> {
         InputEventKind::AbsAxis(axis) => {
             use evdev::AbsoluteAxisType;
 
-            let mut pos = MOUSE_POS.lock().ok()?;
+            let Ok(mut pos) = MOUSE_POS.lock() else {
+                return ConvertedInput::Ignored;
+            };
             let value = ev.value() as f64;
 
             match axis {
@@ -492,15 +550,100 @@ fn convert_event(ev: &evdev::InputEvent, origin: InputOrigin) -> Option<Event> {
             }
         }
 
-        _ => None,
-    }?;
+        InputEventKind::Synchronization(Synchronization::SYN_REPORT) => {
+            let Some(motion) = relative_motion.take() else {
+                return ConvertedInput::Ignored;
+            };
+            let Ok(position) = MOUSE_POS.lock() else {
+                return ConvertedInput::Ignored;
+            };
+            let (x, y) = *position;
 
-    event.origin = origin;
-    Some(event)
+            let mut event = if motion.dragging {
+                Event::mouse_dragged_relative(x, y, motion.delta_x as f64, motion.delta_y as f64)
+            } else {
+                Event::mouse_moved_relative(x, y, motion.delta_x as f64, motion.delta_y as f64)
+            };
+            event.origin = origin;
+
+            return ConvertedInput::RelativeFrame { event, motion };
+        }
+
+        InputEventKind::Synchronization(Synchronization::SYN_DROPPED) => {
+            relative_motion.clear();
+            return ConvertedInput::Discarded;
+        }
+
+        _ => None,
+    };
+
+    match event {
+        Some(mut event) => {
+            event.origin = origin;
+            ConvertedInput::Immediate(event)
+        }
+        None => ConvertedInput::Ignored,
+    }
 }
 
 /// Stop the event hook.
 pub fn stop_hook() -> Result<()> {
     // The stop is signaled via the running atomic
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::event::{EventType, RelativeMotion};
+    use evdev::{InputEvent, RelativeAxisType, Synchronization};
+
+    #[test]
+    fn relative_axes_are_coalesced_at_syn_report() {
+        state::reset_mask();
+        *MOUSE_POS.lock().expect("mouse position lock") = (100.0, 200.0);
+        let mut relative_motion = RelativeMotionFrame::default();
+
+        let raw_events = [
+            InputEvent::new(EvdevEventType::RELATIVE, RelativeAxisType::REL_X.0, 12),
+            InputEvent::new(EvdevEventType::RELATIVE, RelativeAxisType::REL_Y.0, -7),
+            InputEvent::new(
+                EvdevEventType::SYNCHRONIZATION,
+                Synchronization::SYN_REPORT.0,
+                0,
+            ),
+        ];
+
+        let converted = raw_events
+            .iter()
+            .filter_map(|event| {
+                match convert_event(event, InputOrigin::Unknown, &mut relative_motion) {
+                    ConvertedInput::Immediate(event)
+                    | ConvertedInput::RelativeFrame { event, .. } => Some(event),
+                    ConvertedInput::RelativePending
+                    | ConvertedInput::Discarded
+                    | ConvertedInput::Ignored => None,
+                }
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(converted.len(), 1);
+        assert!(matches!(
+            converted[0].event_type,
+            EventType::MouseMoved | EventType::MouseDragged
+        ));
+
+        let mouse = converted[0]
+            .mouse
+            .as_ref()
+            .expect("motion event should contain mouse data");
+        assert_eq!((mouse.x, mouse.y), (112.0, 193.0));
+        assert_eq!(
+            mouse.relative,
+            Some(RelativeMotion {
+                delta_x: 12.0,
+                delta_y: -7.0,
+            })
+        );
+    }
 }

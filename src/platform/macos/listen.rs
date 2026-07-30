@@ -119,6 +119,20 @@ fn number_to_button(button: i64) -> Button {
     }
 }
 
+fn mouse_motion_event(cg_event: &CGEvent, dragged: bool) -> Event {
+    let point = CGEvent::location(Some(cg_event));
+    let delta_x =
+        CGEvent::integer_value_field(Some(cg_event), CGEventField::MouseEventDeltaX) as f64;
+    let delta_y =
+        CGEvent::integer_value_field(Some(cg_event), CGEventField::MouseEventDeltaY) as f64;
+
+    if dragged {
+        Event::mouse_dragged_relative(point.x, point.y, delta_x, delta_y)
+    } else {
+        Event::mouse_moved_relative(point.x, point.y, delta_x, delta_y)
+    }
+}
+
 /// The CGEventTap callback
 unsafe extern "C-unwind" fn event_callback(
     _proxy: CGEventTapProxy,
@@ -318,21 +332,16 @@ unsafe fn convert_event(event_type: CGEventType, cg_event: NonNull<CGEvent>) -> 
         }
 
         CGEventType::MouseMoved => {
-            let point = CGEvent::location(Some(cg_event.as_ref()));
             // THE KEY FIX: Check button state for drag detection
-            if state::is_button_held() {
-                Some(Event::mouse_dragged(point.x, point.y))
-            } else {
-                Some(Event::mouse_moved(point.x, point.y))
-            }
+            Some(mouse_motion_event(
+                cg_event.as_ref(),
+                state::is_button_held(),
+            ))
         }
 
         CGEventType::LeftMouseDragged
         | CGEventType::RightMouseDragged
-        | CGEventType::OtherMouseDragged => {
-            let point = CGEvent::location(Some(cg_event.as_ref()));
-            Some(Event::mouse_dragged(point.x, point.y))
-        }
+        | CGEventType::OtherMouseDragged => Some(mouse_motion_event(cg_event.as_ref(), true)),
 
         CGEventType::ScrollWheel => {
             let point = CGEvent::location(Some(cg_event.as_ref()));
@@ -644,8 +653,9 @@ pub fn stop_hook() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{InjectorIdentity, InputOrigin};
-    use objc2_core_graphics::{CGEventSource, CGEventSourceStateID};
+    use crate::{InjectorIdentity, InputOrigin, RelativeMotion};
+    use objc2_core_foundation::CGPoint;
+    use objc2_core_graphics::{CGEventSource, CGEventSourceStateID, CGMouseButton};
 
     #[test]
     fn convert_event_preserves_this_monio_session_origin() {
@@ -665,6 +675,39 @@ mod tests {
             InputOrigin::Injected {
                 injector: InjectorIdentity::ThisMonioSession,
             }
+        );
+    }
+
+    #[test]
+    fn convert_mouse_event_preserves_absolute_position_and_relative_delta() {
+        let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+            .expect("CGEventSource should be available");
+        let event = CGEvent::new_mouse_event(
+            Some(&source),
+            CGEventType::MouseMoved,
+            CGPoint { x: 120.0, y: 240.0 },
+            CGMouseButton::Left,
+        )
+        .expect("mouse CGEvent should be available");
+
+        CGEvent::set_integer_value_field(Some(&event), CGEventField::MouseEventDeltaX, -9);
+        CGEvent::set_integer_value_field(Some(&event), CGEventField::MouseEventDeltaY, 6);
+
+        let converted = unsafe {
+            convert_event(CGEventType::MouseMoved, NonNull::from(&*event))
+                .expect("event should convert")
+        };
+        let mouse = converted
+            .mouse
+            .expect("motion event should contain mouse data");
+
+        assert_eq!((mouse.x, mouse.y), (120.0, 240.0));
+        assert_eq!(
+            mouse.relative,
+            Some(RelativeMotion {
+                delta_x: -9.0,
+                delta_y: 6.0,
+            })
         );
     }
 }
