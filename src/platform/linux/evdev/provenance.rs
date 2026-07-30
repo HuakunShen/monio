@@ -22,7 +22,8 @@ impl InjectorDeviceIdentity {
         let mut device_numbers = HashSet::new();
 
         for path in paths {
-            let metadata = fs::metadata(path)?;
+            let file = fs::File::open(path)?;
+            let metadata = file.metadata()?;
             if !metadata.file_type().is_char_device() {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,

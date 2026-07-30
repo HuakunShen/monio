@@ -64,24 +64,39 @@ pub(super) fn initialize() -> Result<InjectorDeviceIdentity> {
 }
 
 fn resolve_device_identity(device: &mut VirtualDevice) -> Result<InjectorDeviceIdentity> {
+    resolve_device_identity_with_retry(
+        || {
+            let event_nodes = device
+                .enumerate_dev_nodes_blocking()
+                .and_then(|nodes| nodes.collect::<std::io::Result<Vec<_>>>());
+
+            event_nodes.and_then(|nodes| InjectorDeviceIdentity::from_event_nodes(&nodes))
+        },
+        DEVICE_NODE_ATTEMPTS,
+        DEVICE_NODE_RETRY_DELAY,
+    )
+}
+
+fn resolve_device_identity_with_retry<F>(
+    mut resolve: F,
+    attempts: usize,
+    retry_delay: Duration,
+) -> Result<InjectorDeviceIdentity>
+where
+    F: FnMut() -> std::io::Result<InjectorDeviceIdentity>,
+{
     let mut last_error = None;
 
-    for _ in 0..DEVICE_NODE_ATTEMPTS {
-        let event_nodes = device
-            .enumerate_dev_nodes_blocking()
-            .and_then(|nodes| nodes.collect::<std::io::Result<Vec<_>>>());
-
-        match event_nodes.and_then(|nodes| InjectorDeviceIdentity::from_event_nodes(&nodes)) {
+    for attempt in 0..attempts {
+        match resolve() {
             Ok(identity) => return Ok(identity),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::PermissionDenied
+                ) =>
+            {
                 last_error = Some(error);
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
-                return Err(Error::PermissionDenied(format!(
-                    "Cannot inspect the Monio uinput device node: {}. Make sure the current \
-                     user can access /dev/input.",
-                    error
-                )));
             }
             Err(error) => {
                 return Err(Error::SimulateFailed(format!(
@@ -91,15 +106,26 @@ fn resolve_device_identity(device: &mut VirtualDevice) -> Result<InjectorDeviceI
             }
         }
 
-        thread::sleep(DEVICE_NODE_RETRY_DELAY);
+        if attempt + 1 < attempts {
+            thread::sleep(retry_delay);
+        }
     }
 
-    Err(Error::SimulateFailed(format!(
-        "Failed to resolve Monio uinput device identity: {}",
-        last_error
-            .map(|error| error.to_string())
-            .unwrap_or_else(|| "no input device node appeared".into())
-    )))
+    match last_error {
+        Some(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+            Err(Error::PermissionDenied(format!(
+                "Cannot open the Monio uinput device node after waiting for udev permissions: {}. \
+                 Make sure the current user can read /dev/input/event*.",
+                error
+            )))
+        }
+        last_error => Err(Error::SimulateFailed(format!(
+            "Failed to resolve Monio uinput device identity: {}",
+            last_error
+                .map(|error| error.to_string())
+                .unwrap_or_else(|| "no input device node appeared".into())
+        ))),
+    }
 }
 
 /// Get or create the process-scoped virtual device.
@@ -315,4 +341,31 @@ pub fn mouse_move(x: f64, y: f64) -> Result<()> {
     emit_relative(RelativeAxisType::REL_X, x as i32)?;
     emit_relative(RelativeAxisType::REL_Y, y as i32)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn retries_injector_identity_while_udev_permissions_settle() {
+        let mut attempts = 0;
+
+        let identity = resolve_device_identity_with_retry(
+            || {
+                attempts += 1;
+                if attempts < 3 {
+                    Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+                } else {
+                    InjectorDeviceIdentity::from_event_nodes(&[PathBuf::from("/dev/null")])
+                }
+            },
+            3,
+            Duration::ZERO,
+        );
+
+        assert!(identity.is_ok(), "{identity:?}");
+        assert_eq!(attempts, 3);
+    }
 }

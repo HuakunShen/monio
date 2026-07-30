@@ -1,12 +1,12 @@
 # Cross-platform input provenance handoff
 
 Status: macOS and Windows self-injection detection are implemented and natively
-verified. Linux evdev/uinput exact-device classification is implemented and
-compile-verified, but its privileged native acceptance matrix has not yet run.
-Linux X11 request correlation is implemented and natively verified on GNOME
-X11. X11 active keyboard/pointer grab support is implemented and natively
-verified on GNOME X11 and an isolated Xvfb server. Wayland portal/libei is not
-implemented.
+verified. Linux evdev/uinput exact-device classification has passed a native
+self-loopback test, but its unrelated-device, grab, restart, and hotplug matrix
+is still pending. Linux X11 request correlation is implemented and natively
+verified on GNOME X11. X11 active keyboard/pointer grab support is implemented
+and natively verified on GNOME X11 and an isolated Xvfb server. Wayland
+portal/libei is not implemented.
 
 Last updated: 2026-07-30
 
@@ -43,7 +43,7 @@ The equivalent implementation mechanism is platform-specific:
 | --- | --- | --- |
 | macOS Core Graphics | Random process-session `EventSourceUserData` plus current source PID | Implemented and natively verified |
 | Windows low-level hooks | Random process-session `dwExtraInfo`, plus injected hook flags | Implemented and natively verified |
-| Linux evdev/uinput | Exact live character-device number owned by Monio's uinput handle | Implemented; compile-verified, privileged E2E pending |
+| Linux evdev/uinput | Exact live character-device number owned by Monio's uinput handle | Implemented; native self-loopback verified, broader matrix pending |
 | Linux X11 XRecord/XTest | Persistent XTest client ID plus ordered request/device-event correlation | Implemented and natively verified on GNOME X11 |
 | Wayland portal/libei | Compositor-mediated device/session evidence; at minimum exclude virtual devices from local-source capture | Proposed; backend does not exist |
 
@@ -497,20 +497,49 @@ uinput device but cannot open its event node for listen classification.
 The listener still enumerates devices once per hook start. General physical
 device hotplug/removal is not newly handled by this provenance slice.
 
-### Verification recorded on 2026-07-30
+### Native self-loopback verification on 2026-07-30
 
 The Linux host was Ubuntu with kernel `7.0.0-28-generic`; its local GNOME
-desktop used X11. These checks passed:
+desktop used X11. The user joined the `input` group, physical event nodes were
+`root:input 0660`, and a udev rule made `/dev/uinput` `root:input 0660`.
 
-```bash
-cargo check --no-default-features --features evdev
-cargo fmt --all -- --check
+The first native run exposed a startup race. The evdev crate's
+`enumerate_dev_nodes_blocking()` waits for the uinput sysfs child and returns
+its `/dev/input/event*` path, but it does not wait for udev to finish changing
+the new node from its initial root-only permissions. A syscall trace observed:
+
+```text
+openat(..., "/dev/input/event256", O_RDWR|O_CLOEXEC) = -1 EACCES
+openat(..., "/dev/input/event256", O_RDONLY|O_CLOEXEC) = -1 EACCES
 ```
 
-The current user was not a member of the `input` group and `/dev/uinput` was
-owned by root with mode `0600`, so the privileged native loopback experiment
-was not run. This implementation must not be described as natively verified
-until the matrix below passes.
+Delaying only that open by 500 ms made the listener start, confirming the race.
+Monio now opens the injector event node before recording its device number and
+retries transient `NotFound`/`PermissionDenied` results for up to one second.
+Permanent permission failures still return a permission-specific error.
+
+The provenance diagnostic was also made backend-aware: evdev sends a relative
+`(32, 24)` motion followed by `(-32, -24)` and requires observing the tracked
+positions `(32, 24)` and `(0, 0)`. This avoids both the unsupported evdev
+`mouse_position()` API and a false positive where the X and Y axis events from
+one move were mistaken for outward and return movements.
+
+This native command then passed:
+
+```bash
+cargo run --no-default-features --features evdev \
+  --example synthetic_input_detection
+```
+
+It classified the ControlLeft press/release, relative pointer move, and actual
+inverse relative move as `Injected { ThisMonioSession }`. This verifies
+creation and permission readiness of the Monio uinput node, listen-mode capture
+of that exact node, keyboard/pointer injection, and exact self-device
+classification on this host.
+
+It does not yet verify an unrelated uinput device, exclusive grab
+consume/pass-through behavior, listener restart, hot-unplug/recreation, or a
+Wayland compositor. The broader matrix below remains required.
 
 ### Required privileged/container experiments
 

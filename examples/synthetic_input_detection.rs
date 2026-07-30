@@ -1,6 +1,9 @@
 //! Diagnostic example for verifying provenance on Monio's own simulated input.
 //!
-//! Run with: cargo run --example synthetic_input_detection
+//! Run with:
+//! - X11/macOS/Windows: `cargo run --example synthetic_input_detection`
+//! - Linux evdev:
+//!   `cargo run --no-default-features --features evdev --example synthetic_input_detection`
 
 use monio::channel::listen_unbounded_channel;
 use monio::{
@@ -17,6 +20,11 @@ const MOUSE_OFFSET: (f64, f64) = (32.0, 24.0);
 const HOOK_START_TIMEOUT: Duration = Duration::from_secs(5);
 const COLLECTION_TIMEOUT: Duration = Duration::from_secs(2);
 const ACTION_PAUSE: Duration = Duration::from_millis(150);
+const IS_EVDEV_BACKEND: bool = cfg!(all(
+    target_os = "linux",
+    feature = "evdev",
+    not(feature = "x11")
+));
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct Observation {
@@ -57,10 +65,23 @@ fn observe_event(observed: &mut Observation, event: &Event) {
         observed.control_released = true;
     }
     if event.event_type == EventType::MouseMoved {
-        if observed.reached_target {
-            observed.returned_to_origin = true;
+        if IS_EVDEV_BACKEND {
+            if let Some(mouse) = &event.mouse {
+                if !observed.reached_target
+                    && mouse.x == MOUSE_OFFSET.0
+                    && mouse.y == MOUSE_OFFSET.1
+                {
+                    observed.reached_target = true;
+                } else if observed.reached_target && mouse.x == 0.0 && mouse.y == 0.0 {
+                    observed.returned_to_origin = true;
+                }
+            }
         } else {
-            observed.reached_target = true;
+            if observed.reached_target {
+                observed.returned_to_origin = true;
+            } else {
+                observed.reached_target = true;
+            }
         }
     }
 }
@@ -113,7 +134,27 @@ fn wait_for_hook(receiver: &Receiver<Event>) -> Result<(), Box<dyn Error>> {
     }
 }
 
-fn simulate_sequence(origin: (f64, f64), target: (f64, f64)) -> monio::Result<()> {
+fn evdev_relative_motion_steps() -> [(f64, f64); 2] {
+    [MOUSE_OFFSET, (-MOUSE_OFFSET.0, -MOUSE_OFFSET.1)]
+}
+
+fn motion_steps() -> Result<[(f64, f64); 2], Box<dyn Error>> {
+    if IS_EVDEV_BACKEND {
+        return Ok(evdev_relative_motion_steps());
+    }
+
+    let origin = mouse_position()?;
+    let display = display_at_point(origin.0, origin.1)?.ok_or_else(|| {
+        io::Error::other(format!(
+            "mouse position ({:.1}, {:.1}) is outside known displays",
+            origin.0, origin.1
+        ))
+    })?;
+    let target = choose_target(origin, display.bounds);
+    Ok([target, origin])
+}
+
+fn simulate_sequence(first_move: (f64, f64), second_move: (f64, f64)) -> monio::Result<()> {
     println!("1. Pressing ControlLeft");
     key_press(Key::ControlLeft)?;
     sleep(ACTION_PAUSE);
@@ -125,12 +166,32 @@ fn simulate_sequence(origin: (f64, f64), target: (f64, f64)) -> monio::Result<()
     }
     sleep(ACTION_PAUSE);
 
-    println!("3. Moving mouse to ({:.1}, {:.1})", target.0, target.1);
-    mouse_move(target.0, target.1)?;
+    if IS_EVDEV_BACKEND {
+        println!(
+            "3. Moving mouse relatively by ({:.1}, {:.1})",
+            first_move.0, first_move.1
+        );
+    } else {
+        println!(
+            "3. Moving mouse to ({:.1}, {:.1})",
+            first_move.0, first_move.1
+        );
+    }
+    mouse_move(first_move.0, first_move.1)?;
     sleep(ACTION_PAUSE);
 
-    println!("4. Restoring mouse to ({:.1}, {:.1})", origin.0, origin.1);
-    mouse_move(origin.0, origin.1)?;
+    if IS_EVDEV_BACKEND {
+        println!(
+            "4. Applying inverse relative move ({:.1}, {:.1})",
+            second_move.0, second_move.1
+        );
+    } else {
+        println!(
+            "4. Restoring mouse to ({:.1}, {:.1})",
+            second_move.0, second_move.1
+        );
+    }
+    mouse_move(second_move.0, second_move.1)?;
 
     Ok(())
 }
@@ -170,18 +231,11 @@ fn run_diagnostic(receiver: &Receiver<Event>) -> Result<Observation, Box<dyn Err
     wait_for_hook(receiver)?;
     println!("Listener enabled.\n");
 
-    let origin = mouse_position()?;
-    let display = display_at_point(origin.0, origin.1)?.ok_or_else(|| {
-        io::Error::other(format!(
-            "mouse position ({:.1}, {:.1}) is outside known displays",
-            origin.0, origin.1
-        ))
-    })?;
-    let target = choose_target(origin, display.bounds);
+    let [first_move, second_move] = motion_steps()?;
 
     while receiver.try_recv().is_ok() {}
 
-    simulate_sequence(origin, target)?;
+    simulate_sequence(first_move, second_move)?;
     collect_observations(receiver)
 }
 
@@ -195,8 +249,13 @@ fn print_summary(observed: Observation) {
     println!("=======");
     print_result("Tagged ControlLeft press:", observed.control_pressed);
     print_result("Tagged ControlLeft release:", observed.control_released);
-    print_result("Tagged mouse target:", observed.reached_target);
-    print_result("Tagged mouse restoration:", observed.returned_to_origin);
+    if IS_EVDEV_BACKEND {
+        print_result("Tagged relative mouse move:", observed.reached_target);
+        print_result("Tagged inverse relative move:", observed.returned_to_origin);
+    } else {
+        print_result("Tagged mouse target:", observed.reached_target);
+        print_result("Tagged mouse restoration:", observed.returned_to_origin);
+    }
 
     println!();
     if observed.is_complete() {
@@ -224,7 +283,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("========================================\n");
     println!("This will briefly press ControlLeft and move the mouse, then restore it.");
     println!("On macOS, grant Accessibility permission to the terminal first.");
-    println!("Windows requires no additional hook permission.\n");
+    println!("Windows requires no additional hook permission.");
+    println!("Linux evdev requires read access to /dev/input and write access to /dev/uinput.\n");
 
     let (handle, receiver) = listen_unbounded_channel()?;
     let diagnostic_result = run_diagnostic(&receiver);
@@ -243,6 +303,7 @@ mod tests {
     use super::*;
     use monio::{Event, InjectorIdentity, InputOrigin, Key, Rect};
 
+    #[cfg(not(all(target_os = "linux", feature = "evdev", not(feature = "x11"))))]
     const ORIGIN: (f64, f64) = (100.0, 200.0);
     const TARGET: (f64, f64) = (132.0, 224.0);
 
@@ -277,6 +338,7 @@ mod tests {
         assert!(observed.control_released);
     }
 
+    #[cfg(not(all(target_os = "linux", feature = "evdev", not(feature = "x11"))))]
     #[test]
     fn observes_two_tagged_mouse_moves_in_order() {
         let mut observed = Observation::default();
@@ -296,6 +358,7 @@ mod tests {
         assert!(observed.returned_to_origin);
     }
 
+    #[cfg(not(all(target_os = "linux", feature = "evdev", not(feature = "x11"))))]
     #[test]
     fn observes_tagged_mouse_sequence_across_dpi_coordinate_spaces() {
         let mut observed = Observation::default();
@@ -310,6 +373,44 @@ mod tests {
         );
 
         assert!(observed.reached_target);
+        assert!(observed.returned_to_origin);
+    }
+
+    #[cfg(all(target_os = "linux", feature = "evdev", not(feature = "x11")))]
+    #[test]
+    fn evdev_relative_motion_steps_return_to_the_origin() {
+        assert_eq!(
+            evdev_relative_motion_steps(),
+            [(32.0, 24.0), (-32.0, -24.0)]
+        );
+    }
+
+    #[cfg(all(target_os = "linux", feature = "evdev", not(feature = "x11")))]
+    #[test]
+    fn evdev_observation_waits_for_the_inverse_relative_move() {
+        let mut observed = Observation::default();
+
+        observe_event(
+            &mut observed,
+            &from_this_session(Event::mouse_moved(32.0, 0.0)),
+        );
+        observe_event(
+            &mut observed,
+            &from_this_session(Event::mouse_moved(32.0, 24.0)),
+        );
+
+        assert!(observed.reached_target);
+        assert!(!observed.returned_to_origin);
+
+        observe_event(
+            &mut observed,
+            &from_this_session(Event::mouse_moved(0.0, 24.0)),
+        );
+        observe_event(
+            &mut observed,
+            &from_this_session(Event::mouse_moved(0.0, 0.0)),
+        );
+
         assert!(observed.returned_to_origin);
     }
 
