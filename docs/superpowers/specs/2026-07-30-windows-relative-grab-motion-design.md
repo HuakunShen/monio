@@ -213,9 +213,11 @@ A focused internal `RawMouseInput` component will:
 3. register Generic Desktop mouse usage (`usage_page = 0x01`,
    `usage = 0x02`) with `RIDEV_INPUTSINK`;
 4. decode `WM_INPUT` with `GetRawInputData`;
-5. expose relative mouse samples to the grab loop;
-6. remove Monio's registration during cleanup; and
-7. restore the previous registration exactly when Monio still owns the mouse
+5. inspect `GetCurrentInputMessageSource` and ignore injected Raw Input because
+   injected movement is handled by the provenance-aware low-level hook;
+6. expose physical mouse samples to the grab loop;
+7. remove Monio's registration during cleanup; and
+8. restore the previous registration exactly when Monio still owns the mouse
    registration.
 
 Initialization must finish before `HookEnabled`. A readiness gate remains
