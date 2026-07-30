@@ -618,16 +618,15 @@ pub fn run_grab_hook<H: GrabHandler + 'static>(
 /// main thread's run loop — not the background hook thread's. In Electron,
 /// this would attempt to stop Chromium's main run loop.
 pub fn stop_hook() -> Result<()> {
-    if let Ok(guard) = HOOK_RUN_LOOP.lock() {
-        if let Some(ref rl) = *guard {
-            if !rl.0.is_null() {
-                // Safety: CFRunLoopStop is thread-safe per Apple docs.
-                // The pointer is valid because the hook thread's run loop is
-                // still alive (Hook::stop sets the flag, calls us, then joins).
-                unsafe {
-                    (&*rl.0).stop();
-                }
-            }
+    if let Ok(guard) = HOOK_RUN_LOOP.lock()
+        && let Some(ref rl) = *guard
+        && !rl.0.is_null()
+    {
+        // Safety: CFRunLoopStop is thread-safe per Apple docs.
+        // The pointer is valid because the hook thread's run loop is
+        // still alive (Hook::stop sets the flag, calls us, then joins).
+        unsafe {
+            (&*rl.0).stop();
         }
     }
     Ok(())

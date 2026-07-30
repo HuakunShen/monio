@@ -279,47 +279,47 @@ impl App {
                 if let Some(kb) = &event.keyboard {
                     let key_str = Self::format_key(&kb.key);
                     self.add_key(&key_str, false);
-                    self.add_event("KeyRelease", format!("{}", key_str));
+                    self.add_event("KeyRelease", key_str.to_string());
                 }
             }
             EventType::MousePressed => {
-                if let Some(mouse) = &event.mouse {
-                    if let Some(button) = mouse.button {
-                        let btn_idx = Self::button_index(&button);
-                        self.mouse_buttons[btn_idx] = true;
-                        let btn_str = Self::format_button(&button);
-                        self.add_event(
-                            "MousePress",
-                            format!("{} at ({:.0}, {:.0})", btn_str, mouse.x, mouse.y),
-                        );
-                    }
+                if let Some(mouse) = &event.mouse
+                    && let Some(button) = mouse.button
+                {
+                    let btn_idx = Self::button_index(&button);
+                    self.mouse_buttons[btn_idx] = true;
+                    let btn_str = Self::format_button(&button);
+                    self.add_event(
+                        "MousePress",
+                        format!("{} at ({:.0}, {:.0})", btn_str, mouse.x, mouse.y),
+                    );
                 }
             }
             EventType::MouseReleased => {
-                if let Some(mouse) = &event.mouse {
-                    if let Some(button) = mouse.button {
-                        let btn_idx = Self::button_index(&button);
-                        self.mouse_buttons[btn_idx] = false;
-                        let btn_str = Self::format_button(&button);
-                        self.add_event(
-                            "MouseRelease",
-                            format!("{} at ({:.0}, {:.0})", btn_str, mouse.x, mouse.y),
-                        );
-                    }
+                if let Some(mouse) = &event.mouse
+                    && let Some(button) = mouse.button
+                {
+                    let btn_idx = Self::button_index(&button);
+                    self.mouse_buttons[btn_idx] = false;
+                    let btn_str = Self::format_button(&button);
+                    self.add_event(
+                        "MouseRelease",
+                        format!("{} at ({:.0}, {:.0})", btn_str, mouse.x, mouse.y),
+                    );
                 }
             }
             EventType::MouseClicked => {
-                if let Some(mouse) = &event.mouse {
-                    if let Some(button) = mouse.button {
-                        let btn_str = Self::format_button(&button);
-                        self.add_event(
-                            "MouseClick",
-                            format!(
-                                "{} clicks={} at ({:.0}, {:.0})",
-                                btn_str, mouse.clicks, mouse.x, mouse.y
-                            ),
-                        );
-                    }
+                if let Some(mouse) = &event.mouse
+                    && let Some(button) = mouse.button
+                {
+                    let btn_str = Self::format_button(&button);
+                    self.add_event(
+                        "MouseClick",
+                        format!(
+                            "{} clicks={} at ({:.0}, {:.0})",
+                            btn_str, mouse.clicks, mouse.x, mouse.y
+                        ),
+                    );
                 }
             }
             EventType::MouseMoved => {
@@ -400,17 +400,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let timeout = tick_rate.saturating_sub(last_tick.elapsed());
 
         // Check for crossterm events (for exit)
-        if crossterm::event::poll(timeout)? {
-            if let CEvent::Key(key) = event::read()? {
-                match key.code {
-                    KeyCode::Char('q') | KeyCode::Char('Q') => {
-                        app.should_exit = true;
-                    }
-                    KeyCode::Char('c') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
-                        app.should_exit = true;
-                    }
-                    _ => {}
+        if crossterm::event::poll(timeout)?
+            && let CEvent::Key(key) = event::read()?
+        {
+            match key.code {
+                KeyCode::Char('q') | KeyCode::Char('Q') => {
+                    app.should_exit = true;
                 }
+                KeyCode::Char('c') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
+                    app.should_exit = true;
+                }
+                _ => {}
             }
         }
 

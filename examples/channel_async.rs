@@ -54,13 +54,13 @@ async fn main() {
                             }
                             EventType::MouseDragged => {
                                 // Only print every 20th drag event
-                                if event_count % 20 == 0 {
-                                    if let Some(mouse) = &event.mouse {
-                                        println!(
-                                            "[{}] Dragging at ({:.0}, {:.0})",
-                                            event_count, mouse.x, mouse.y
-                                        );
-                                    }
+                                if event_count.is_multiple_of(20)
+                                    && let Some(mouse) = &event.mouse
+                                {
+                                    println!(
+                                        "[{}] Dragging at ({:.0}, {:.0})",
+                                        event_count, mouse.x, mouse.y
+                                    );
                                 }
                             }
                             EventType::HookEnabled => {
