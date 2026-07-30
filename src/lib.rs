@@ -7,6 +7,7 @@
 //! - Cross-platform support (macOS, Windows, Linux)
 //! - Proper drag detection (distinguishes `MouseDragged` from `MouseMoved`)
 //! - Event grabbing (consume events to prevent them from reaching other apps)
+//! - Explicit relative-pointer capture leases for remote-control sessions
 //! - Clean, Rust-idiomatic API with traits and enums
 //! - Thread-safe design with atomic state tracking
 //! - Event simulation support
@@ -68,6 +69,7 @@ pub mod error;
 pub mod event;
 pub mod hook;
 pub mod keycode;
+pub mod pointer_capture;
 #[cfg(feature = "recorder")]
 pub mod recorder;
 pub mod state;
@@ -87,6 +89,7 @@ pub use event::{
 };
 pub use hook::{EventHandler, GrabHandler, Hook, grab, listen};
 pub use keycode::Key;
+pub use pointer_capture::RelativePointerCapture;
 #[cfg(feature = "recorder")]
 pub use recorder::{EventRecorder, RecordedEvent, Recording};
 #[cfg(feature = "statistics")]
@@ -97,3 +100,23 @@ pub use platform::{
     key_press, key_release, key_tap, mouse_click, mouse_move, mouse_move_relative, mouse_position,
     mouse_press, mouse_release, simulate,
 };
+
+#[cfg(all(test, not(target_os = "windows")))]
+mod relative_pointer_capture_api_tests {
+    use super::{Error, RelativePointerCapture};
+
+    #[test]
+    fn relative_pointer_capture_is_process_exclusive() {
+        let _test_guard = crate::pointer_capture::TEST_MUTEX.lock().unwrap();
+        let first =
+            RelativePointerCapture::acquire().expect("first capture lease should be acquired");
+
+        let error =
+            RelativePointerCapture::acquire().expect_err("a second capture lease must be rejected");
+        assert!(matches!(error, Error::RelativePointerCaptureAlreadyActive));
+
+        first
+            .release()
+            .expect("explicit release should restore native pointer state");
+    }
+}

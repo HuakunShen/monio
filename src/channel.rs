@@ -45,6 +45,7 @@ use crate::error::{Error, Result};
 use crate::event::Event;
 use crate::hook::{EventHandler, GrabHandler};
 use crate::platform;
+use crate::pointer_capture;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, SyncSender};
@@ -72,18 +73,23 @@ impl ChannelHookHandle {
 
     fn stop_inner(&mut self) -> Result<()> {
         if !self.running.swap(false, Ordering::SeqCst) {
-            return Ok(()); // Already stopped
+            return pointer_capture::release_active();
         }
 
-        platform::stop_hook()?;
+        let stop_result = platform::stop_hook();
+        if let Err(error) = stop_result {
+            return pointer_capture::finish_hook_result(Err(error));
+        }
 
-        if let Some(handle) = self.thread_handle.take() {
+        let join_result = if let Some(handle) = self.thread_handle.take() {
             handle
                 .join()
-                .map_err(|_| Error::ThreadError("failed to join hook thread".into()))?;
-        }
+                .map_err(|_| Error::ThreadError("failed to join hook thread".into()))
+        } else {
+            Ok(())
+        };
 
-        Ok(())
+        pointer_capture::finish_hook_result(join_result)
     }
 }
 
@@ -148,7 +154,10 @@ pub fn listen_channel(capacity: usize) -> Result<(ChannelHookHandle, Receiver<Ev
 
     let thread_handle = thread::spawn(move || {
         let handler = ChannelHandler { sender };
-        let _ = platform::run_hook(&running_clone, handler);
+        let result = platform::run_hook(&running_clone, handler);
+        if let Err(error) = pointer_capture::finish_hook_result(result) {
+            log::error!("channel input hook stopped with an error: {error}");
+        }
         running_clone.store(false, Ordering::SeqCst);
     });
 
@@ -187,7 +196,10 @@ pub fn listen_unbounded_channel() -> Result<(ChannelHookHandle, Receiver<Event>)
 
     let thread_handle = thread::spawn(move || {
         let handler = UnboundedChannelHandler { sender };
-        let _ = platform::run_hook(&running_clone, handler);
+        let result = platform::run_hook(&running_clone, handler);
+        if let Err(error) = pointer_capture::finish_hook_result(result) {
+            log::error!("channel input hook stopped with an error: {error}");
+        }
         running_clone.store(false, Ordering::SeqCst);
     });
 
@@ -271,7 +283,10 @@ where
 
     let thread_handle = thread::spawn(move || {
         let handler = GrabChannelHandler { sender, filter };
-        let _ = platform::run_grab_hook(&running_clone, handler);
+        let result = platform::run_grab_hook(&running_clone, handler);
+        if let Err(error) = pointer_capture::finish_hook_result(result) {
+            log::error!("channel input grab hook stopped with an error: {error}");
+        }
         running_clone.store(false, Ordering::SeqCst);
     });
 
@@ -342,7 +357,10 @@ mod tokio_channel {
 
         let thread_handle = thread::spawn(move || {
             let handler = TokioChannelHandler { sender };
-            let _ = platform::run_hook(&running_clone, handler);
+            let result = platform::run_hook(&running_clone, handler);
+            if let Err(error) = pointer_capture::finish_hook_result(result) {
+                log::error!("async channel input hook stopped with an error: {error}");
+            }
             running_clone.store(false, Ordering::SeqCst);
         });
 
@@ -426,7 +444,10 @@ mod tokio_channel {
 
         let thread_handle = thread::spawn(move || {
             let handler = TokioGrabChannelHandler { sender, filter };
-            let _ = platform::run_grab_hook(&running_clone, handler);
+            let result = platform::run_grab_hook(&running_clone, handler);
+            if let Err(error) = pointer_capture::finish_hook_result(result) {
+                log::error!("async channel input grab hook stopped with an error: {error}");
+            }
             running_clone.store(false, Ordering::SeqCst);
         });
 

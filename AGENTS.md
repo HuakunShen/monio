@@ -41,6 +41,7 @@ cargo run --example simulate           # synthesize input
 cargo run --example synthetic_input_detection # verify macOS/Windows self-injection provenance
 cargo run --features x11 --example x11_grab_detection # native X11 grab diagnostic
 cargo run --features x11 --example x11_relative_grab_detection # XI2 relative-motion diagnostic
+cargo run --example crossflow_relative_capture # 5-second cursor-disassociated capture diagnostic
 cargo run --example mouse_position     # query cursor position
 cargo run --example display            # monitor/DPI/system-settings query
 cargo run --example channel_sync       # non-blocking std mpsc channel

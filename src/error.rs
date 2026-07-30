@@ -16,6 +16,10 @@ pub enum Error {
     #[error("hook is not running")]
     NotRunning,
 
+    /// A process-wide relative pointer capture lease is already active.
+    #[error("relative pointer capture is already active")]
+    RelativePointerCaptureAlreadyActive,
+
     /// Failed to start the hook.
     #[error("failed to start hook: {0}")]
     HookStartFailed(String),
