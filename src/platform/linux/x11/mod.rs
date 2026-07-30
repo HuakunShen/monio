@@ -4,6 +4,7 @@ mod display;
 mod listen;
 mod provenance;
 mod simulate;
+mod xinput;
 
 pub use display::{display_at_point, displays, primary_display, system_settings};
 pub use listen::{run_grab_hook, run_hook, stop_hook};

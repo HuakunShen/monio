@@ -40,7 +40,7 @@ jobs:
       - name: Install dependencies (Linux)
         run: |
           sudo apt-get update
-          sudo apt-get install -y libx11-dev libxtst-dev libevdev-dev
+          sudo apt-get install -y libx11-dev libxi-dev libxtst-dev libevdev-dev
 
       - name: Run clippy (default features)
         run: cargo clippy -- -D warnings
@@ -74,7 +74,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libx11-dev libxtst-dev libevdev-dev
+          sudo apt-get install -y libx11-dev libxi-dev libxtst-dev libevdev-dev
 
       # Cache cargo build
       - name: Cache cargo
@@ -126,7 +126,7 @@ jobs:
       - name: Install dependencies (Linux)
         run: |
           sudo apt-get update
-          sudo apt-get install -y libx11-dev libxtst-dev libevdev-dev
+          sudo apt-get install -y libx11-dev libxi-dev libxtst-dev libevdev-dev
 
       - name: Build documentation
         run: cargo doc --all-features --no-deps
