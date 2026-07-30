@@ -112,10 +112,7 @@ fn display_from_info(hmonitor: HMONITOR, info: &MONITORINFOEXW, id: u32) -> Disp
     let height = (rect.bottom - rect.top) as f64;
     let is_primary = (info.monitorInfo.dwFlags & MONITORINFOF_PRIMARY) != 0;
 
-    let scale_factor = match monitor_dpi_scale(hmonitor) {
-        Some(scale) => scale,
-        None => 1.0,
-    };
+    let scale_factor = monitor_dpi_scale(hmonitor).unwrap_or(1.0);
 
     let refresh_rate = monitor_refresh_rate(info);
 

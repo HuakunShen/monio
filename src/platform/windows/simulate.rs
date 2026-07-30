@@ -16,7 +16,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetCursorPos, GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN,
 };
 
-use super::keycodes::key_to_keycode;
+use super::{keycodes::key_to_keycode, provenance};
 
 const WHEEL_DELTA: u32 = 120;
 
@@ -30,9 +30,9 @@ pub fn mouse_position() -> Result<(f64, f64)> {
     Ok((point.x as f64, point.y as f64))
 }
 
-/// Send a mouse event
-fn sim_mouse_event(flags: MOUSE_EVENT_FLAGS, data: u32, dx: i32, dy: i32) -> Result<()> {
-    let input = INPUT {
+fn build_mouse_input(flags: MOUSE_EVENT_FLAGS, data: u32, dx: i32, dy: i32) -> Result<INPUT> {
+    let session_tag = provenance::session_tag()?;
+    Ok(INPUT {
         r#type: INPUT_MOUSE,
         Anonymous: INPUT_0 {
             mi: MOUSEINPUT {
@@ -41,11 +41,15 @@ fn sim_mouse_event(flags: MOUSE_EVENT_FLAGS, data: u32, dx: i32, dy: i32) -> Res
                 mouseData: data,
                 dwFlags: flags,
                 time: 0,
-                dwExtraInfo: 0,
+                dwExtraInfo: session_tag,
             },
         },
-    };
+    })
+}
 
+/// Send a mouse event
+fn sim_mouse_event(flags: MOUSE_EVENT_FLAGS, data: u32, dx: i32, dy: i32) -> Result<()> {
+    let input = build_mouse_input(flags, data, dx, dy)?;
     let inputs = [input];
     let result = unsafe { SendInput(&inputs, size_of::<INPUT>() as i32) };
 
@@ -58,14 +62,14 @@ fn sim_mouse_event(flags: MOUSE_EVENT_FLAGS, data: u32, dx: i32, dy: i32) -> Res
     }
 }
 
-/// Send a keyboard event
-fn sim_keyboard_event(vk: u16, flags: u32) -> Result<()> {
+fn build_keyboard_input(vk: u16, flags: u32) -> Result<INPUT> {
+    let session_tag = provenance::session_tag()?;
     let mut dwflags = windows::Win32::UI::Input::KeyboardAndMouse::KEYBD_EVENT_FLAGS(0);
     if flags != 0 {
         dwflags = KEYEVENTF_KEYUP;
     }
 
-    let input = INPUT {
+    Ok(INPUT {
         r#type: INPUT_KEYBOARD,
         Anonymous: INPUT_0 {
             ki: KEYBDINPUT {
@@ -73,11 +77,15 @@ fn sim_keyboard_event(vk: u16, flags: u32) -> Result<()> {
                 wScan: 0,
                 dwFlags: dwflags,
                 time: 0,
-                dwExtraInfo: 0,
+                dwExtraInfo: session_tag,
             },
         },
-    };
+    })
+}
 
+/// Send a keyboard event
+fn sim_keyboard_event(vk: u16, flags: u32) -> Result<()> {
+    let input = build_keyboard_input(vk, flags)?;
     let inputs = [input];
     let result = unsafe { SendInput(&inputs, size_of::<INPUT>() as i32) };
 
@@ -104,17 +112,17 @@ pub fn simulate(event: &Event) -> Result<()> {
             }
         }
         EventType::MousePressed => {
-            if let Some(mouse) = &event.mouse {
-                if let Some(button) = mouse.button {
-                    mouse_press(button)?;
-                }
+            if let Some(mouse) = &event.mouse
+                && let Some(button) = mouse.button
+            {
+                mouse_press(button)?;
             }
         }
         EventType::MouseReleased => {
-            if let Some(mouse) = &event.mouse {
-                if let Some(button) = mouse.button {
-                    mouse_release(button)?;
-                }
+            if let Some(mouse) = &event.mouse
+                && let Some(button) = mouse.button
+            {
+                mouse_release(button)?;
             }
         }
         EventType::MouseMoved | EventType::MouseDragged => {
@@ -209,7 +217,7 @@ pub fn mouse_scroll(delta_y: i32, delta_x: i32) -> Result<()> {
     if delta_y != 0 {
         sim_mouse_event(
             MOUSEEVENTF_WHEEL,
-            (delta_y as i32).wrapping_mul(WHEEL_DELTA as i32) as u32,
+            delta_y.wrapping_mul(WHEEL_DELTA as i32) as u32,
             0,
             0,
         )?;
@@ -217,10 +225,38 @@ pub fn mouse_scroll(delta_y: i32, delta_x: i32) -> Result<()> {
     if delta_x != 0 {
         sim_mouse_event(
             MOUSEEVENTF_HWHEEL,
-            (delta_x as i32).wrapping_mul(WHEEL_DELTA as i32) as u32,
+            delta_x.wrapping_mul(WHEEL_DELTA as i32) as u32,
             0,
             0,
         )?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn keyboard_input_carries_this_session_tag() {
+        let input = build_keyboard_input(0x41, 0).expect("keyboard input should build");
+        let keyboard = unsafe { input.Anonymous.ki };
+
+        assert_eq!(
+            keyboard.dwExtraInfo,
+            provenance::session_tag().expect("session tag should initialize")
+        );
+    }
+
+    #[test]
+    fn mouse_input_carries_this_session_tag() {
+        let input =
+            build_mouse_input(MOUSEEVENTF_MOVE, 0, 100, 200).expect("mouse input should build");
+        let mouse = unsafe { input.Anonymous.mi };
+
+        assert_eq!(
+            mouse.dwExtraInfo,
+            provenance::session_tag().expect("session tag should initialize")
+        );
+    }
 }

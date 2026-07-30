@@ -10,7 +10,7 @@
 //! - Clean, Rust-idiomatic API with traits and enums
 //! - Thread-safe design with atomic state tracking
 //! - Event simulation support
-//! - Input provenance for Monio's own macOS simulation events
+//! - Input provenance for Monio's own macOS and Windows simulation events
 //!
 //! ## Quick Start
 //!

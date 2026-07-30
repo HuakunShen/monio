@@ -28,7 +28,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WM_SYSKEYDOWN, WM_SYSKEYUP, WM_XBUTTONDOWN, WM_XBUTTONUP,
 };
 
-use super::keycodes::keycode_to_key;
+use super::{keycodes::keycode_to_key, provenance};
 
 // Constants
 const WHEEL_DELTA: i16 = 120;
@@ -97,7 +97,21 @@ unsafe fn get_xbutton_code(lpdata: LPARAM) -> u8 {
 unsafe fn convert_event(wparam: WPARAM, lparam: LPARAM) -> Option<Event> {
     let msg = wparam.0 as u32;
 
-    match msg {
+    let origin = match msg {
+        WM_KEYDOWN | WM_SYSKEYDOWN | WM_KEYUP | WM_SYSKEYUP => {
+            let keyboard = unsafe { &*(lparam.0 as *const KBDLLHOOKSTRUCT) };
+            provenance::keyboard_event_origin(keyboard)
+        }
+        WM_LBUTTONDOWN | WM_LBUTTONUP | WM_RBUTTONDOWN | WM_RBUTTONUP | WM_MBUTTONDOWN
+        | WM_MBUTTONUP | WM_XBUTTONDOWN | WM_XBUTTONUP | WM_MOUSEMOVE | WM_MOUSEWHEEL
+        | WM_MOUSEHWHEEL => {
+            let mouse = unsafe { &*(lparam.0 as *const MSLLHOOKSTRUCT) };
+            provenance::mouse_event_origin(mouse)
+        }
+        _ => return None,
+    };
+
+    let event = match msg {
         WM_KEYDOWN | WM_SYSKEYDOWN => {
             let code = unsafe { get_vk_code(lparam) };
             update_key_modifier(code, true);
@@ -211,43 +225,44 @@ unsafe fn convert_event(wparam: WPARAM, lparam: LPARAM) -> Option<Event> {
         }
 
         _ => None,
-    }
+    };
+
+    event.map(|mut event| {
+        event.origin = origin;
+        event
+    })
 }
 
 /// Keyboard hook callback
 unsafe extern "system" fn keyboard_callback(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if code == HC_ACTION as i32 {
         // Check stop flag
-        if let Ok(guard) = STOP_FLAG.lock() {
-            if let Some(ref flag) = *guard {
-                if !flag.load(Ordering::SeqCst) {
-                    // Stop requested
-                    if let Ok(thread_id) = THREAD_ID.lock() {
-                        let _ = unsafe {
-                            PostThreadMessageW(*thread_id, WM_QUIT, WPARAM(0), LPARAM(0))
-                        };
-                    }
-                }
+        if let Ok(guard) = STOP_FLAG.lock()
+            && let Some(ref flag) = *guard
+            && !flag.load(Ordering::SeqCst)
+        {
+            // Stop requested
+            if let Ok(thread_id) = THREAD_ID.lock() {
+                let _ = unsafe { PostThreadMessageW(*thread_id, WM_QUIT, WPARAM(0), LPARAM(0)) };
             }
         }
 
         if let Some(event) = unsafe { convert_event(wparam, lparam) } {
             // Check if we're in grab mode
             if GRAB_MODE.load(Ordering::SeqCst) {
-                if let Ok(guard) = GRAB_HANDLER.lock() {
-                    if let Some(ref handler) = *guard {
-                        if handler.handle_event(&event).is_none() {
-                            // Handler returned None - consume the event
-                            return LRESULT(1);
-                        }
-                    }
+                if let Ok(guard) = GRAB_HANDLER.lock()
+                    && let Some(ref handler) = *guard
+                    && handler.handle_event(&event).is_none()
+                {
+                    // Handler returned None - consume the event
+                    return LRESULT(1);
                 }
             } else {
                 // Listen mode: just dispatch
-                if let Ok(guard) = HANDLER.lock() {
-                    if let Some(ref handler) = *guard {
-                        handler.handle_event(&event);
-                    }
+                if let Ok(guard) = HANDLER.lock()
+                    && let Some(ref handler) = *guard
+                {
+                    handler.handle_event(&event);
                 }
             }
         }
@@ -261,36 +276,32 @@ unsafe extern "system" fn keyboard_callback(code: i32, wparam: WPARAM, lparam: L
 unsafe extern "system" fn mouse_callback(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if code == HC_ACTION as i32 {
         // Check stop flag (same as keyboard callback)
-        if let Ok(guard) = STOP_FLAG.lock() {
-            if let Some(ref flag) = *guard {
-                if !flag.load(Ordering::SeqCst) {
-                    // Stop requested
-                    if let Ok(thread_id) = THREAD_ID.lock() {
-                        let _ = unsafe {
-                            PostThreadMessageW(*thread_id, WM_QUIT, WPARAM(0), LPARAM(0))
-                        };
-                    }
-                }
+        if let Ok(guard) = STOP_FLAG.lock()
+            && let Some(ref flag) = *guard
+            && !flag.load(Ordering::SeqCst)
+        {
+            // Stop requested
+            if let Ok(thread_id) = THREAD_ID.lock() {
+                let _ = unsafe { PostThreadMessageW(*thread_id, WM_QUIT, WPARAM(0), LPARAM(0)) };
             }
         }
 
         if let Some(event) = unsafe { convert_event(wparam, lparam) } {
             // Check if we're in grab mode
             if GRAB_MODE.load(Ordering::SeqCst) {
-                if let Ok(guard) = GRAB_HANDLER.lock() {
-                    if let Some(ref handler) = *guard {
-                        if handler.handle_event(&event).is_none() {
-                            // Handler returned None - consume the event
-                            return LRESULT(1);
-                        }
-                    }
+                if let Ok(guard) = GRAB_HANDLER.lock()
+                    && let Some(ref handler) = *guard
+                    && handler.handle_event(&event).is_none()
+                {
+                    // Handler returned None - consume the event
+                    return LRESULT(1);
                 }
             } else {
                 // Listen mode: just dispatch
-                if let Ok(guard) = HANDLER.lock() {
-                    if let Some(ref handler) = *guard {
-                        handler.handle_event(&event);
-                    }
+                if let Ok(guard) = HANDLER.lock()
+                    && let Some(ref handler) = *guard
+                {
+                    handler.handle_event(&event);
                 }
             }
         }
@@ -302,6 +313,8 @@ unsafe extern "system" fn mouse_callback(code: i32, wparam: WPARAM, lparam: LPAR
 
 /// Run the event hook (blocking).
 pub fn run_hook<H: EventHandler + 'static>(running: &Arc<AtomicBool>, handler: H) -> Result<()> {
+    provenance::initialize()?;
+
     // Store handler and stop flag
     {
         let mut h = HANDLER
@@ -350,10 +363,10 @@ pub fn run_hook<H: EventHandler + 'static>(running: &Arc<AtomicBool>, handler: H
 
     // Send hook enabled event
     {
-        if let Ok(guard) = HANDLER.lock() {
-            if let Some(ref handler) = *guard {
-                handler.handle_event(&Event::hook_enabled());
-            }
+        if let Ok(guard) = HANDLER.lock()
+            && let Some(ref handler) = *guard
+        {
+            handler.handle_event(&Event::hook_enabled());
         }
     }
 
@@ -362,36 +375,35 @@ pub fn run_hook<H: EventHandler + 'static>(running: &Arc<AtomicBool>, handler: H
     unsafe {
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
             // Check stop flag
-            if let Ok(guard) = STOP_FLAG.lock() {
-                if let Some(ref flag) = *guard {
-                    if !flag.load(Ordering::SeqCst) {
-                        break;
-                    }
-                }
+            if let Ok(guard) = STOP_FLAG.lock()
+                && let Some(ref flag) = *guard
+                && !flag.load(Ordering::SeqCst)
+            {
+                break;
             }
         }
     }
 
     // Send hook disabled event
     {
-        if let Ok(guard) = HANDLER.lock() {
-            if let Some(ref handler) = *guard {
-                handler.handle_event(&Event::hook_disabled());
-            }
+        if let Ok(guard) = HANDLER.lock()
+            && let Some(ref handler) = *guard
+        {
+            handler.handle_event(&Event::hook_disabled());
         }
     }
 
     // Clean up hooks
     unsafe {
-        if let Ok(mut kh) = KEYBOARD_HOOK.lock() {
-            if let Some(hook) = kh.take() {
-                let _ = UnhookWindowsHookEx(hook.0);
-            }
+        if let Ok(mut kh) = KEYBOARD_HOOK.lock()
+            && let Some(hook) = kh.take()
+        {
+            let _ = UnhookWindowsHookEx(hook.0);
         }
-        if let Ok(mut mh) = MOUSE_HOOK.lock() {
-            if let Some(hook) = mh.take() {
-                let _ = UnhookWindowsHookEx(hook.0);
-            }
+        if let Ok(mut mh) = MOUSE_HOOK.lock()
+            && let Some(hook) = mh.take()
+        {
+            let _ = UnhookWindowsHookEx(hook.0);
         }
     }
 
@@ -419,6 +431,8 @@ pub fn run_grab_hook<H: GrabHandler + 'static>(
     running: &Arc<AtomicBool>,
     handler: H,
 ) -> Result<()> {
+    provenance::initialize()?;
+
     // Store handler and stop flag
     {
         let mut h = GRAB_HANDLER
@@ -470,10 +484,10 @@ pub fn run_grab_hook<H: GrabHandler + 'static>(
 
     // Send hook enabled event
     {
-        if let Ok(guard) = GRAB_HANDLER.lock() {
-            if let Some(ref handler) = *guard {
-                let _ = handler.handle_event(&Event::hook_enabled());
-            }
+        if let Ok(guard) = GRAB_HANDLER.lock()
+            && let Some(ref handler) = *guard
+        {
+            let _ = handler.handle_event(&Event::hook_enabled());
         }
     }
 
@@ -482,36 +496,35 @@ pub fn run_grab_hook<H: GrabHandler + 'static>(
     unsafe {
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
             // Check stop flag
-            if let Ok(guard) = STOP_FLAG.lock() {
-                if let Some(ref flag) = *guard {
-                    if !flag.load(Ordering::SeqCst) {
-                        break;
-                    }
-                }
+            if let Ok(guard) = STOP_FLAG.lock()
+                && let Some(ref flag) = *guard
+                && !flag.load(Ordering::SeqCst)
+            {
+                break;
             }
         }
     }
 
     // Send hook disabled event
     {
-        if let Ok(guard) = GRAB_HANDLER.lock() {
-            if let Some(ref handler) = *guard {
-                let _ = handler.handle_event(&Event::hook_disabled());
-            }
+        if let Ok(guard) = GRAB_HANDLER.lock()
+            && let Some(ref handler) = *guard
+        {
+            let _ = handler.handle_event(&Event::hook_disabled());
         }
     }
 
     // Clean up hooks
     unsafe {
-        if let Ok(mut kh) = KEYBOARD_HOOK.lock() {
-            if let Some(hook) = kh.take() {
-                let _ = UnhookWindowsHookEx(hook.0);
-            }
+        if let Ok(mut kh) = KEYBOARD_HOOK.lock()
+            && let Some(hook) = kh.take()
+        {
+            let _ = UnhookWindowsHookEx(hook.0);
         }
-        if let Ok(mut mh) = MOUSE_HOOK.lock() {
-            if let Some(hook) = mh.take() {
-                let _ = UnhookWindowsHookEx(hook.0);
-            }
+        if let Ok(mut mh) = MOUSE_HOOK.lock()
+            && let Some(hook) = mh.take()
+        {
+            let _ = UnhookWindowsHookEx(hook.0);
         }
     }
 
@@ -535,12 +548,72 @@ pub fn run_grab_hook<H: GrabHandler + 'static>(
 
 /// Stop the event hook.
 pub fn stop_hook() -> Result<()> {
-    if let Ok(thread_id) = THREAD_ID.lock() {
-        if *thread_id != 0 {
-            unsafe {
-                let _ = PostThreadMessageW(*thread_id, WM_QUIT, WPARAM(0), LPARAM(0));
-            }
+    if let Ok(thread_id) = THREAD_ID.lock()
+        && *thread_id != 0
+    {
+        unsafe {
+            let _ = PostThreadMessageW(*thread_id, WM_QUIT, WPARAM(0), LPARAM(0));
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{InjectorIdentity, InputOrigin};
+    use windows::Win32::Foundation::POINT;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        KBDLLHOOKSTRUCT_FLAGS, LLKHF_INJECTED, LLMHF_INJECTED,
+    };
+
+    fn this_session_origin() -> InputOrigin {
+        InputOrigin::Injected {
+            injector: InjectorIdentity::ThisMonioSession,
+        }
+    }
+
+    #[test]
+    fn convert_keyboard_event_preserves_this_monio_session_origin() {
+        let raw_event = KBDLLHOOKSTRUCT {
+            vkCode: 0x41,
+            scanCode: 0,
+            flags: KBDLLHOOKSTRUCT_FLAGS(LLKHF_INJECTED.0),
+            time: 0,
+            dwExtraInfo: super::super::provenance::session_tag()
+                .expect("session tag should initialize"),
+        };
+
+        let converted = unsafe {
+            convert_event(
+                WPARAM(WM_KEYDOWN as usize),
+                LPARAM((&raw_event as *const KBDLLHOOKSTRUCT) as isize),
+            )
+            .expect("keyboard event should convert")
+        };
+
+        assert_eq!(converted.origin, this_session_origin());
+    }
+
+    #[test]
+    fn convert_mouse_event_preserves_this_monio_session_origin() {
+        let raw_event = MSLLHOOKSTRUCT {
+            pt: POINT { x: 100, y: 200 },
+            mouseData: 0,
+            flags: LLMHF_INJECTED,
+            time: 0,
+            dwExtraInfo: super::super::provenance::session_tag()
+                .expect("session tag should initialize"),
+        };
+
+        let converted = unsafe {
+            convert_event(
+                WPARAM(WM_MOUSEMOVE as usize),
+                LPARAM((&raw_event as *const MSLLHOOKSTRUCT) as isize),
+            )
+            .expect("mouse event should convert")
+        };
+
+        assert_eq!(converted.origin, this_session_origin());
+    }
 }

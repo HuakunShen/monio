@@ -38,7 +38,7 @@ cargo run --example basic              # event logging
 cargo run --example drag_detection     # MouseDragged vs MouseMoved demo
 cargo run --example grab               # block specific keys
 cargo run --example simulate           # synthesize input
-cargo run --example synthetic_input_detection # verify macOS self-injection provenance
+cargo run --example synthetic_input_detection # verify macOS/Windows self-injection provenance
 cargo run --example mouse_position     # query cursor position
 cargo run --example display            # monitor/DPI/system-settings query
 cargo run --example channel_sync       # non-blocking std mpsc channel

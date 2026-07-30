@@ -335,10 +335,12 @@ Every `Event` includes an `origin: InputOrigin`. Treat
 `InputOrigin::Unknown` as an honest lack of evidence, not as proof that the
 event came from physical hardware.
 
-On macOS, every event injected through Monio's simulation API carries a random,
-process-session tag in `CGEventField::EventSourceUserData`. The event-tap
-listener recognizes it only when both that exact tag and
-`CGEventField::EventSourceUnixProcessID` match the current process:
+On macOS and Windows, every event injected through Monio's simulation API
+carries a random process-session tag. macOS stores it in
+`CGEventField::EventSourceUserData` and also validates
+`CGEventField::EventSourceUnixProcessID`. Windows stores a 32-bit tag in
+`KEYBDINPUT::dwExtraInfo` or `MOUSEINPUT::dwExtraInfo` and accepts it only when
+the low-level hook also reports `LLKHF_INJECTED` or `LLMHF_INJECTED`:
 
 ```rust
 use monio::Event;
@@ -357,11 +359,12 @@ fn handle(event: &Event) {
 This is a non-authenticating feedback-loop marker for Monio's own injected
 input, not a security or authorization boundary. It does not prove that an
 untagged event is physical: another program may synthesize an untagged event,
-and privileged or Accessibility-authorized software may be able to imitate
-source metadata. Windows and Linux currently report `InputOrigin::Unknown`
-until their native backends preserve equivalent evidence.
+and privileged, Accessibility-authorized, or suitably positioned software may
+be able to imitate source metadata. Linux currently reports
+`InputOrigin::Unknown` until its native backends preserve equivalent evidence.
 
-Run the native macOS diagnostic after granting Accessibility permission:
+Run the native macOS or Windows diagnostic. macOS requires Accessibility
+permission:
 
 ```bash
 cargo run --example synthetic_input_detection
@@ -435,7 +438,7 @@ cargo run --example drag_detection
 # Event simulation
 cargo run --example simulate
 
-# macOS self-injection provenance
+# macOS/Windows self-injection provenance
 cargo run --example synthetic_input_detection
 
 # Event grabbing (block specific keys)

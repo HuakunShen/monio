@@ -13,7 +13,6 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
-const COORDINATE_TOLERANCE: f64 = 1.0;
 const MOUSE_OFFSET: (f64, f64) = (32.0, 24.0);
 const HOOK_START_TIMEOUT: Duration = Duration::from_secs(5);
 const COLLECTION_TIMEOUT: Duration = Duration::from_secs(2);
@@ -36,12 +35,7 @@ impl Observation {
     }
 }
 
-fn observe_event(
-    observed: &mut Observation,
-    event: &Event,
-    origin: (f64, f64),
-    target: (f64, f64),
-) {
+fn observe_event(observed: &mut Observation, event: &Event) {
     if !event.is_from_this_monio_session() {
         return;
     }
@@ -62,21 +56,13 @@ fn observe_event(
     {
         observed.control_released = true;
     }
-    if event.event_type == EventType::MouseMoved
-        && let Some(mouse) = &event.mouse
-    {
-        if point_is_near((mouse.x, mouse.y), target) {
+    if event.event_type == EventType::MouseMoved {
+        if observed.reached_target {
+            observed.returned_to_origin = true;
+        } else {
             observed.reached_target = true;
         }
-        if observed.reached_target && point_is_near((mouse.x, mouse.y), origin) {
-            observed.returned_to_origin = true;
-        }
     }
-}
-
-fn point_is_near(actual: (f64, f64), expected: (f64, f64)) -> bool {
-    (actual.0 - expected.0).abs() <= COORDINATE_TOLERANCE
-        && (actual.1 - expected.1).abs() <= COORDINATE_TOLERANCE
 }
 
 fn choose_target(origin: (f64, f64), bounds: Rect) -> (f64, f64) {
@@ -149,11 +135,7 @@ fn simulate_sequence(origin: (f64, f64), target: (f64, f64)) -> monio::Result<()
     Ok(())
 }
 
-fn collect_observations(
-    receiver: &Receiver<Event>,
-    origin: (f64, f64),
-    target: (f64, f64),
-) -> Result<Observation, Box<dyn Error>> {
+fn collect_observations(receiver: &Receiver<Event>) -> Result<Observation, Box<dyn Error>> {
     let deadline = Instant::now() + COLLECTION_TIMEOUT;
     let mut observed = Observation::default();
 
@@ -166,7 +148,7 @@ fn collect_observations(
         match receiver.recv_timeout(remaining) {
             Ok(event) => {
                 let before = observed;
-                observe_event(&mut observed, &event, origin, target);
+                observe_event(&mut observed, &event);
                 if observed != before {
                     println!("   listener received: {event:?}");
                 }
@@ -200,7 +182,7 @@ fn run_diagnostic(receiver: &Receiver<Event>) -> Result<Observation, Box<dyn Err
     while receiver.try_recv().is_ok() {}
 
     simulate_sequence(origin, target)?;
-    collect_observations(receiver, origin, target)
+    collect_observations(receiver)
 }
 
 fn print_result(label: &str, observed: bool) {
@@ -241,7 +223,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("monio synthetic input provenance example");
     println!("========================================\n");
     println!("This will briefly press ControlLeft and move the mouse, then restore it.");
-    println!("On macOS, grant Accessibility permission to the terminal first.\n");
+    println!("On macOS, grant Accessibility permission to the terminal first.");
+    println!("Windows requires no additional hook permission.\n");
 
     let (handle, receiver) = listen_unbounded_channel()?;
     let diagnostic_result = run_diagnostic(&receiver);
@@ -277,8 +260,6 @@ mod tests {
         observe_event(
             &mut observed,
             &from_this_session(Event::key_pressed(Key::ControlLeft, 0)),
-            ORIGIN,
-            TARGET,
         );
 
         assert!(observed.control_pressed);
@@ -291,36 +272,41 @@ mod tests {
         observe_event(
             &mut observed,
             &from_this_session(Event::key_released(Key::ControlLeft, 0)),
-            ORIGIN,
-            TARGET,
         );
 
         assert!(observed.control_released);
     }
 
     #[test]
-    fn observes_mouse_moves_near_requested_coordinates() {
+    fn observes_two_tagged_mouse_moves_in_order() {
         let mut observed = Observation::default();
 
         observe_event(
             &mut observed,
             &from_this_session(Event::mouse_moved(ORIGIN.0, ORIGIN.1)),
-            ORIGIN,
-            TARGET,
         );
+        assert!(observed.reached_target);
         assert!(!observed.returned_to_origin);
 
         observe_event(
             &mut observed,
             &from_this_session(Event::mouse_moved(TARGET.0 + 0.5, TARGET.1 - 0.5)),
-            ORIGIN,
-            TARGET,
+        );
+
+        assert!(observed.returned_to_origin);
+    }
+
+    #[test]
+    fn observes_tagged_mouse_sequence_across_dpi_coordinate_spaces() {
+        let mut observed = Observation::default();
+
+        observe_event(
+            &mut observed,
+            &from_this_session(Event::mouse_moved(1500.0, 900.0)),
         );
         observe_event(
             &mut observed,
-            &from_this_session(Event::mouse_moved(ORIGIN.0 - 0.5, ORIGIN.1 + 0.5)),
-            ORIGIN,
-            TARGET,
+            &from_this_session(Event::mouse_moved(1400.0, 800.0)),
         );
 
         assert!(observed.reached_target);
@@ -344,18 +330,8 @@ mod tests {
     fn ignores_unrelated_input() {
         let mut observed = Observation::default();
 
-        observe_event(
-            &mut observed,
-            &Event::key_pressed(Key::KeyA, 0),
-            ORIGIN,
-            TARGET,
-        );
-        observe_event(
-            &mut observed,
-            &Event::mouse_moved(400.0, 500.0),
-            ORIGIN,
-            TARGET,
-        );
+        observe_event(&mut observed, &Event::key_pressed(Key::KeyA, 0));
+        observe_event(&mut observed, &Event::mouse_moved(400.0, 500.0));
 
         assert_eq!(observed, Observation::default());
     }
@@ -364,18 +340,8 @@ mod tests {
     fn ignores_matching_input_without_this_session_origin() {
         let mut observed = Observation::default();
 
-        observe_event(
-            &mut observed,
-            &Event::key_pressed(Key::ControlLeft, 0),
-            ORIGIN,
-            TARGET,
-        );
-        observe_event(
-            &mut observed,
-            &Event::mouse_moved(TARGET.0, TARGET.1),
-            ORIGIN,
-            TARGET,
-        );
+        observe_event(&mut observed, &Event::key_pressed(Key::ControlLeft, 0));
+        observe_event(&mut observed, &Event::mouse_moved(TARGET.0, TARGET.1));
 
         assert_eq!(observed, Observation::default());
     }
