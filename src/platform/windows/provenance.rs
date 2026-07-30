@@ -54,6 +54,7 @@ pub(super) fn grab_replay_tag() -> Result<usize> {
     Ok(tags()?.grab_replay)
 }
 
+#[cfg(test)]
 fn recognized_tags() -> Result<[usize; 2]> {
     let tags = tags()?;
     Ok([tags.injection, tags.grab_replay])
