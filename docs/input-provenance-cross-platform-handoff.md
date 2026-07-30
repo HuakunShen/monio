@@ -8,8 +8,7 @@ verified on GNOME X11. X11 active keyboard/pointer grab support is implemented
 and natively verified on GNOME X11 and an isolated Xvfb server. XI2 relative
 grab motion and relative XTest injection are implemented; automated
 initialization/injection/cleanup checks and native physical RawMotion/drag
-capture pass. Explicit screen-edge and pass-through feel confirmation remains
-pending. Wayland
+capture, screen-edge continuation, and gesture pass-through all pass. Wayland
 portal/libei is not implemented.
 
 Last updated: 2026-07-30
@@ -381,7 +380,8 @@ Relevant files:
 1. opens a dedicated X connection and maps a 1x1 off-screen,
    override-redirect `InputOnly` window;
 2. requires XI2 2.1+ and selects `XI_RawMotion` for the master pointer;
-3. acquires `XGrabKeyboard` first and `XGrabPointer` second;
+3. acquires `XGrabKeyboard` first and a synchronous `XGrabPointer` second,
+   then uses `SyncPointer` to run until the next button event;
 4. rolls the keyboard grab back if pointer acquisition fails;
 5. reports `AlreadyGrabbed`, `GrabInvalidTime`, `GrabNotViewable`, and
    `GrabFrozen` with device-specific startup errors;
@@ -390,9 +390,9 @@ Relevant files:
 7. consumes events whose handler returns `None`;
 8. temporarily deselects raw motion, releases, XTest-replays, reacquires, and
    reselects around passed standalone motion;
-9. yields a complete pointer gesture after a passed `ButtonPress`, because the
-   receiving X11 client owns an implicit pointer grab until release, then
-   reacquires the pointer and raw selection;
+9. uses `ReplayPointer` with `CurrentTime` for passed pointer-button events,
+   yielding the original event to the receiving X11 client and its implicit
+   grab until release, then reacquires the pointer and raw selection;
 10. deselects raw motion, ungrabs both devices, destroys the window, and closes
     the connection on normal stop or error. X11 also releases the grabs
     automatically if the process connection dies.
@@ -427,8 +427,8 @@ Both runs passed with these independently observed behaviors:
 - passed W press/release: handler 2, observer 2;
 - consumed left-button press/release: handler 2, observer 0;
 - passed right-button gesture: handler observed its start, observer received
-  press and release;
-- consumed pointer motion: handler 1, observer 0;
+  press, button-held motion, and release;
+- consumed standalone pointer motion: handler 1, observer 0;
 - an existing keyboard grab produced the expected conflict error;
 - an existing pointer grab caused pointer acquisition to fail and the
   diagnostic then acquired the keyboard, proving keyboard rollback.
@@ -461,6 +461,11 @@ The diagnostic observer is deliberately placed at root coordinates `(256,
 window before generating events. Its original `(32, 32)` location was under
 GNOME's top-bar/compositor overlay, so a passed right-button gesture went to
 GNOME Shell rather than the observer and produced a false failure.
+
+The first diagnostic used an immediate passed button pair, which did not catch
+the later native drag failure. It now waits between the passed press, motion,
+and release and requires the observer's `MotionNotify` to carry the expected
+held-button mask.
 
 ### X11 relative motion for CrossFlow
 
@@ -553,17 +558,30 @@ cargo run --features x11 --example x11_relative_grab_detection -- --pass-through
 ```
 
 The consume run received 992 relative motion events, including 176
-`MouseDragged` events. The pass-through run received 252 relative motion
-events, including 129 `MouseDragged` events. Both runs observed positive and
-negative X and Y deltas, reported zero motion events without relative data,
-and released the grab at timeout. This verifies physical XI2 RawMotion
-delivery, sparse-axis decoding, direction signs, drag classification, and
-normal-stop cleanup on this system.
+`MouseDragged` events. It observed both signs on both axes, reported zero
+motion events without relative data, and continued reporting nonzero deltas
+while the pointer was held against a screen edge.
 
-The output alone does not prove that raw deltas continued while repeatedly
-pushing against a screen edge, or that local pass-through felt one-to-one
-without feedback, doubling, or jumps. Record those two observations explicitly
-before marking edge and pass-through behavior natively accepted.
+The original pass-through implementation used asynchronous `XGrabPointer`,
+released it, and synthesized another press with XTest. A delayed drag
+regression test proved that the target received neither the complete button
+pair nor button-held motion: Monio reacquired the pointer while the physical
+button was still down. X11 cannot `ReplayPointer` an event frozen directly by
+`XGrabPointer`; the corrected path uses a synchronous pointer grab, arms it
+with `SyncPointer`, and replays the original frozen button event with
+`ReplayPointer`. `CurrentTime` is required here; using the event timestamp left
+the request ineffective on the tested server.
+
+After the fix, the isolated Xvfb observer received the passed press, a
+`MotionNotify` carrying the held-button mask, and the release. The final native
+pass-through run received 1,298 ordinary relative events, zero missing-relative
+events, all four direction signs, and zero `MouseDragged` callbacks. The user
+confirmed that drag-to-highlight worked. Zero drag callbacks are expected in
+this mode because Monio sees the passed press, then the receiving application
+owns the gesture until release. Both native runs released the grab at timeout.
+This verifies physical RawMotion delivery, direction signs, edge continuation,
+consume-mode drag classification, gesture pass-through, and normal-stop cleanup
+on this GNOME X11 system.
 
 Do not make the first CrossFlow implementation depend on selective local
 pass-through. While control is on B or C, all captured keyboard and pointer

@@ -22,7 +22,8 @@ The X11 backend already has the other required building blocks:
 
 - XRecord for ordinary, non-blocking listening;
 - active `XGrabKeyboard` and `XGrabPointer` sessions for suppression;
-- XTest for local pass-through and input injection.
+- XTest for input injection and key/standalone-motion pass-through;
+- synchronous `SyncPointer`/`ReplayPointer` for pointer-button gestures.
 
 XInput2 (XI2) adds the missing primitive: `XI_RawMotion` events contain
 relative device motion and are delivered independently of the clipped core
@@ -206,6 +207,13 @@ is deselected while the receiving application's implicit pointer gesture owns
 the pointer and is reselected only after Monio reacquires the pointer. This
 retains the documented behavior that Monio may not receive intermediate motion
 or release events for a passed local pointer gesture.
+
+Pointer-button pass-through uses a synchronous `XGrabPointer`. `SyncPointer`
+allows input to run until the next button event, which freezes the pointer for
+the handler's decision. Returning `Some(event)` calls `ReplayPointer` with
+`CurrentTime`, releasing Monio's grab and reprocessing the original event for
+the target application. Keys and standalone pointer motion keep their XTest
+replay paths.
 
 All selection, ungrab, replay, and regrab transitions are synchronized with the
 X server. Failure to restore either the pointer grab or XI2 raw selection stops

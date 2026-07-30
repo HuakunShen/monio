@@ -643,6 +643,12 @@ For a passed pointer press, suspend before `begin_pointer_passthrough()`. In
 button mask has been synchronized. If replay, regrab, or resume fails, return
 the error and allow `Drop` to release the remaining resources.
 
+The final implementation uses synchronous `XGrabPointer` plus `SyncPointer` to
+freeze on each button event. A passed button event uses `ReplayPointer` with
+`CurrentTime`, so the target application receives the original event and owns
+the complete implicit-grab gesture. The Xvfb regression test includes
+press → button-held motion → release, not merely an immediate button pair.
+
 Update `ActiveGrabs::drop()` to deselect raw motion before releasing the
 pointer and keyboard grabs. Cleanup remains best-effort in `Drop`; operational
 selection errors have already been propagated by the event loop.
@@ -763,6 +769,10 @@ cargo run --features x11 --example x11_relative_grab_detection -- --pass-through
 
 Expected: local cursor/application motion occurs once, event count remains
 bounded, and there is no feedback loop or doubled movement.
+
+Final native result: drag-to-highlight worked, edge motion retained nonzero raw
+deltas, and the passed gesture produced zero Monio `MouseDragged` callbacks
+because the receiving application owned the implicit grab until release.
 
 Also exercise finite pass-through under Xvfb:
 

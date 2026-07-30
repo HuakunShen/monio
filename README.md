@@ -149,14 +149,14 @@ fn main() {
 | ------------- | ------------ | --------------------------------------------------- |
 | macOS         | ✅ Full      | Via CGEventTap                                      |
 | Windows       | ✅ Full      | Via low-level hooks                                 |
-| Linux/X11     | ✅ Active    | XGrab + XI2 RawMotion with XTest pass-through       |
+| Linux/X11     | ✅ Active    | XGrab + XI2 RawMotion and gesture replay            |
 | Linux/Wayland | ⚠️ Limited   | See [Wayland Limitation](#wayland-limitation) below |
 
 On Linux/X11, ordinary `listen()` keeps reporting absolute motion.
 `grab()` requires XI2 2.1+ and attaches raw relative deltas to
 `mouse.relative`. Those deltas come from XI2 raw motion rather than being
 derived from cursor coordinates that may be clipped at a screen edge. Native
-edge behavior still needs verification on each supported X11 environment:
+edge behavior passed on GNOME X11; validate other X11 environments separately:
 
 ```rust
 use monio::{Event, EventType, grab};
@@ -444,9 +444,11 @@ Two backends are available:
 
 **X11 (default)**: Uses XRecord for listen-only capture, active
 `XGrabKeyboard`/`XGrabPointer` sessions plus XI2 RawMotion for `grab()`, and
-XTest for simulation and grab pass-through. It works only on X11 and requires
-no `input` group or `/dev/uinput` access. `grab()` fails explicitly if the X
-server does not support XI2 2.1 or newer.
+XTest for simulation and key/motion replay. Pointer-button pass-through uses
+X11's synchronous grab plus `ReplayPointer`, so the receiving application owns
+the complete gesture. It works only on X11 and requires no `input` group or
+`/dev/uinput` access. `grab()` fails explicitly if the X server does not
+support XI2 2.1 or newer.
 
 `MouseData::x/y` remain absolute screen coordinates. In X11 grab mode,
 `MouseData::relative` contains raw `delta_x/delta_y`; in ordinary XRecord
