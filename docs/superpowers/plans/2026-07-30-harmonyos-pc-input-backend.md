@@ -68,7 +68,7 @@ linking `libohinput.so`.
 - Consumes: the platform contract called from `hook.rs`, `simulate.rs`, and `display.rs`
 - Produces: OHOS definitions of `run_hook`, `run_grab_hook`, `stop_hook`, `simulate`, key/mouse convenience functions, `mouse_position`, and display/system query functions
 
-- [ ] **Step 1: Preserve the current target-check failure as the red test**
+- [x] **Step 1: Preserve the current target-check failure as the red test**
 
 Run:
 
@@ -79,7 +79,7 @@ cargo check --target aarch64-unknown-linux-ohos
 Expected: FAIL in the `x11` build script because the current
 `cfg(target_os = "linux")` dependency block treats OHOS as desktop Linux.
 
-- [ ] **Step 2: Narrow ordinary Linux and add the OHOS dependency**
+- [x] **Step 2: Narrow ordinary Linux and add the OHOS dependency**
 
 Use these target dependency sections in `Cargo.toml`:
 
@@ -109,7 +109,7 @@ pub use linux::*;
 
 Keep OHOS accepted by the final `compile_error!` guard.
 
-- [ ] **Step 3: Add a complete compile-only platform scaffold**
+- [x] **Step 3: Add a complete compile-only platform scaffold**
 
 In `src/platform/ohos/mod.rs`, declare `display`, `listen`, and `simulate`, then
 re-export their platform-contract functions. In the three modules, use the
@@ -143,7 +143,7 @@ pub fn display_at_point(x: f64, y: f64) -> Result<Option<DisplayInfo>>;
 pub fn system_settings() -> Result<SystemSettings>;
 ```
 
-- [ ] **Step 4: Verify target selection and host regression**
+- [x] **Step 4: Verify target selection and host regression**
 
 Run:
 
@@ -155,7 +155,7 @@ cargo test
 
 Expected: all commands PASS; the OHOS check does not build `x11`.
 
-- [ ] **Step 5: Commit the routing**
+- [x] **Step 5: Commit the routing**
 
 ```bash
 git add Cargo.toml Cargo.lock src/platform/mod.rs src/platform/ohos

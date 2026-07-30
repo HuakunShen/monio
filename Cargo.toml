@@ -40,10 +40,13 @@ windows = { version = "0.59", features = [
     "Win32_UI_Shell",
 ] }
 
-[target.'cfg(target_os = "linux")'.dependencies]
+[target.'cfg(all(target_os = "linux", not(target_env = "ohos")))'.dependencies]
 x11 = { version = "2.21", features = ["xlib", "xrecord", "xtst"], optional = true }
 evdev = { version = "0.12", optional = true }
 libc = { version = "0.2", optional = true }
+
+[target.'cfg(target_env = "ohos")'.dependencies]
+ohos-input-sys = { version = "0.3.4", features = ["api-23"] }
 
 [features]
 default = ["x11"]
