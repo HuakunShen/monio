@@ -1,5 +1,10 @@
 //! Platform-specific implementations.
 
+#[cfg(any(
+    target_os = "macos",
+    target_os = "windows",
+    all(target_os = "linux", any(feature = "x11", feature = "evdev"))
+))]
 mod motion;
 
 #[cfg(target_os = "macos")]

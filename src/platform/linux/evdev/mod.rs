@@ -15,20 +15,24 @@
 //! # Then log out and back in
 //! ```
 //!
-//! ## Wayland Grab Limitation
+//! ## Wayland Grab Compatibility
 //!
 //! On **Wayland**, `run_grab_hook` pass-through behavior depends on the
 //! compositor and libinput environment:
 //!
-//! - ✅ Events you **consume** (return `None` from handler) are properly blocked
-//! - ⚠️ Events you **pass through** (return `Some(event)`) may not reach applications
+//! - Events you **consume** (return `None` from the handler) are blocked through
+//!   the kernel's exclusive evdev grab.
+//! - Events you **pass through** (return `Some(event)`) are re-injected through
+//!   Monio's uinput virtual device.
 //!
 //! Grabbing intercepts events before the compositor sees them. Pass-through
 //! requires re-injection through a uinput virtual device, and compositor policy
-//! for those events varies.
+//! for those events varies. GNOME 46 with libinput 1.25 has been natively
+//! verified for selective keyboard blocking and keyboard, click, motion, and
+//! drag pass-through; validate other compositors separately.
 //!
-//! For selective event filtering on Wayland, consider using your compositor's
-//! native hotkey/configuration system instead of this library.
+//! For an unprivileged desktop product, prefer compositor-mediated portal/libei
+//! APIs when available.
 
 #![allow(unused_imports)]
 

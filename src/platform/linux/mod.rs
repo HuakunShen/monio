@@ -20,22 +20,23 @@
 //! # Then log out and back in
 //! ```
 //!
-//! ## Grab Mode on Wayland - IMPORTANT LIMITATION
+//! ## Grab Mode on Wayland
 //!
 //! On **Wayland**, grab pass-through behavior depends on the compositor and
 //! libinput environment:
 //!
-//! - ✅ **Blocking events works**: Events you consume (return `None`) are blocked
-//! - ⚠️ **Pass-through may fail**: Events you pass through (return `Some(event)`)
-//!   may not reach other applications
+//! - **Blocking works** through the kernel's exclusive evdev grab.
+//! - **Pass-through** re-injects allowed events through a uinput virtual device.
 //!
 //! Grabbing intercepts events before the compositor sees them. Pass-through
 //! requires re-injection through a uinput virtual device, and compositor policy
-//! for those events varies.
+//! for those events varies. GNOME 46 with libinput 1.25 has been natively
+//! verified for selective keyboard blocking and keyboard, click, motion, and
+//! drag pass-through; validate other compositors separately.
 //!
-//! **Requirements for grab mode (even with limitations):**
+//! **Requirements for grab mode:**
 //! - Membership in the `input` group
-//! - Access to `/dev/uinput` (for re-injection attempts)
+//! - Access to `/dev/uinput` (for re-injection)
 //!
 //! ```bash
 //! sudo usermod -aG input $USER
@@ -43,8 +44,8 @@
 //! sudo udevadm control --reload-rules
 //! ```
 //!
-//! **Recommendation:** Use X11 instead of Wayland for full grab support, or use
-//! grab only for consuming/blocking events rather than selective pass-through.
+//! A desktop application should prefer compositor-mediated portal/libei APIs
+//! when available and treat evdev/uinput as an explicitly privileged backend.
 
 mod keycodes;
 
