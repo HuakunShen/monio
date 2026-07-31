@@ -142,10 +142,39 @@ final class SelfTest {
       !afterOneRelease.contains(where: { $0 == (.shiftRight, false) }),
       "releasing left shift left right shift alone")
     try? injector.key(.shiftRight, pressed: false)
-    injector.resetModifiers()
+    injector.resetHeldInput()
     settle()
 
-    print("4. display enumeration works without any permission")
+    print("4. motion while a button is held goes out as a drag, not a move")
+    // The whole reason this check exists: macOS will not turn a `mouseMoved`
+    // into a drag just because a button is down. Posting the wrong one is
+    // invisible here — the cursor still moves — and shows up on the far machine
+    // as text that will not select and windows that will not move.
+    let start = MonioDisplays.pointerLocation ?? CGPoint(x: 200, y: 200)
+    _ = drain()
+    try? injector.button(.left, pressed: true, at: start)
+    try? injector.movePointer(to: CGPoint(x: start.x + 12, y: start.y + 12))
+    settle()
+    let duringPress = drain()
+    try? injector.button(.left, pressed: false, at: CGPoint(x: start.x + 12, y: start.y + 12))
+    injector.resetHeldInput()
+    settle()
+    _ = drain()
+
+    check(
+      duringPress.contains {
+        if case .pointerDragged(.left) = $0.kind { return true }
+        return false
+      },
+      "the tap saw a left drag")
+    check(
+      !duringPress.contains {
+        if case .pointerMoved = $0.kind { return true }
+        return false
+      },
+      "and no plain move was posted alongside it")
+
+    print("5. display enumeration works without any permission")
     let displays = MonioDisplays.active()
     check(!displays.isEmpty, "at least one display was reported")
     check(displays.filter(\.isPrimary).count == 1, "exactly one is primary")

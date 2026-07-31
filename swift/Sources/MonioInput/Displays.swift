@@ -46,4 +46,25 @@ public enum MonioDisplays {
       )
     }
   }
+
+  /// The display containing `point`, or `nil` if the point is off every screen.
+  ///
+  /// The lookup is done here rather than by a caller comparing rectangles
+  /// because the answer decides which edge the pointer is leaving from, and two
+  /// implementations of "contains" that disagree at the boundary produce a
+  /// pointer that crosses one pixel early on one machine and one pixel late on
+  /// the other.
+  public static func display(at point: CGPoint, in displays: [MonioDisplay]? = nil)
+    -> MonioDisplay?
+  {
+    (displays ?? active()).first { $0.bounds.contains(point) }
+  }
+
+  /// Where the cursor is now, in the global display space.
+  ///
+  /// Read from a fresh event rather than remembered, because anything can move
+  /// the cursor — another application, a hot corner, the user's other hand.
+  public static var pointerLocation: CGPoint? {
+    CGEvent(source: nil)?.location
+  }
 }

@@ -19,6 +19,29 @@ let tap = EventTap { event in
 try tap.start()
 ```
 
+## What is here, against the Rust crate
+
+This is the subset a CrossFlow head needs, not a port. The three primitives are
+all present:
+
+| Rust | Swift |
+| --- | --- |
+| `listen` | `EventTap`, returning `.pass` |
+| `grab` | the same tap, returning `.consume` |
+| `simulate`, `key_press`/`key_release`, `mouse_press`/`mouse_release`, `mouse_move` | `Injector.key`/`button`/`movePointer`/`scroll` |
+| `MouseMoved` vs `MouseDragged` | `.pointerMoved` vs `.pointerDragged(button)` |
+| `displays`, `primary_display`, `display_at_point` | `MonioDisplays.active()`, `.isPrimary`, `display(at:)` |
+| `mouse_position` | `MonioDisplays.pointerLocation` |
+| `RelativePointerCapture` | `RelativePointerCapture.shared` |
+| `InputOrigin` | `InputOrigin`, same two-part evidence |
+
+Deliberately absent, because the head does not use them and an untested
+convenience is worse than none: `channel` (the head owns its own
+`AsyncStream`), `recorder`, `statistics`, `key_tap`, `mouse_click`,
+`KeyTyped` (dead-key composition — a head forwards key codes, and the far
+machine's own input method composes), `HookEnabled`/`HookDisabled` (the tap
+re-enables itself and does not report it), and `system_settings`.
+
 ## Permissions, and what that means for testing
 
 | | Accessibility needed | Testable headlessly |
@@ -28,14 +51,20 @@ try tap.start()
 | `EventTap` | yes | only from a permitted process |
 | `Injector` | yes | only from a permitted process |
 
-`swift test` covers everything in the first two rows — 11 tests, no display
-server required.
+Run everything from **this directory** (`vendors/monio/swift`) — the executables
+are SwiftPM products, so they are started with `swift run <product>`. Handing
+`swift` a source file directly runs it in script mode with no package around it,
+which fails with `no such module 'MonioInput'`.
+
+```
+swift test                      # 16 tests, no permission, no display server
+swift run monio-selftest        # needs Accessibility; no human
+swift run monio-capture-demo    # needs Accessibility; --grab to swallow
+```
+
+`swift test` covers everything in the first two rows of the table.
 
 For the rest there is `monio-selftest`, which needs no human:
-
-```
-swift run monio-selftest
-```
 
 It injects events into itself and asserts that its own tap saw them, tagged as
 self-injected, with modifier press/release round-tripping and left/right

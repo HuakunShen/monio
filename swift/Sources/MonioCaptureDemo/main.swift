@@ -48,12 +48,16 @@ let tap = EventTap { event in
     print("key      \(pressed ? "down" : "up  ")  \(key)  [\(origin)]")
   case let .button(button, pressed):
     print("button   \(pressed ? "down" : "up  ")  \(button)  [\(origin)]")
-  case .pointerMoved:
+  case .pointerMoved, .pointerDragged:
     let delta = event.delta ?? .zero
+    var label = "pointer "
+    if case let .pointerDragged(button) = event.kind {
+      label = "drag(\(button))"
+    }
     // Deltas are the interesting part while grabbing: the location stops
     // changing the moment the cursor is frozen.
     print(
-      "pointer  \(Int(event.location.x)),\(Int(event.location.y))"
+      "\(label)  \(Int(event.location.x)),\(Int(event.location.y))"
         + "  d(\(Int(delta.dx)),\(Int(delta.dy)))  [\(origin)]")
   case let .scroll(deltaX, deltaY):
     print("scroll   \(Int(deltaX)),\(Int(deltaY))  [\(origin)]")

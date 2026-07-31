@@ -235,8 +235,18 @@ public final class EventTap: @unchecked Sendable {
       }
       return make(.key(key, pressed: pressed), delta: nil)
 
-    case .mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
+    case .mouseMoved:
       return make(.pointerMoved, delta: delta)
+
+    case .leftMouseDragged:
+      return make(.pointerDragged(.left), delta: delta)
+
+    case .rightMouseDragged:
+      return make(.pointerDragged(.right), delta: delta)
+
+    case .otherMouseDragged:
+      let number = UInt8(clamping: event.getIntegerValueField(.mouseEventButtonNumber) + 1)
+      return make(.pointerDragged(MonioButton(number: number)), delta: delta)
 
     case .leftMouseDown, .leftMouseUp:
       return make(.button(.left, pressed: type == .leftMouseDown), delta: nil)

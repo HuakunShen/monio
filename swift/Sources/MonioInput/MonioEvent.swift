@@ -30,6 +30,11 @@ public struct MonioEvent: Sendable {
     case key(MonioKey, pressed: Bool)
     case button(MonioButton, pressed: Bool)
     case pointerMoved
+    /// Motion with a button held. Reported apart from `pointerMoved` because
+    /// macOS delivers it as a different event, and because a caller that
+    /// re-injects motion elsewhere has to re-create the distinction — see
+    /// `Injector.movePointer`.
+    case pointerDragged(MonioButton)
     case scroll(deltaX: Double, deltaY: Double)
   }
 

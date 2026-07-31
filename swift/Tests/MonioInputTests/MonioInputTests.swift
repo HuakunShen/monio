@@ -130,6 +130,47 @@ struct ModifierTests {
   }
 }
 
+@Suite("Injected pointer motion")
+struct MotionTests {
+  /// With nothing held, motion is a move. This is the only case where posting
+  /// `mouseMoved` is right.
+  @Test func idleMotionIsAMove() {
+    let (type, button) = Injector.motion(heldButtons: [])
+    #expect(type == .mouseMoved)
+    #expect(button == .left)
+  }
+
+  /// The bug this pins: macOS does not turn a `mouseMoved` into a drag just
+  /// because a button is down. An application watching `mouseDragged:` — text
+  /// selection, dragging a file, moving a window — sees nothing at all, so the
+  /// remote user watches the cursor travel and no drag happen.
+  @Test func motionWhileHoldingAButtonIsADrag() {
+    #expect(Injector.motion(heldButtons: [MonioButton.left.number]).0 == .leftMouseDragged)
+    #expect(Injector.motion(heldButtons: [MonioButton.right.number]).0 == .rightMouseDragged)
+    #expect(Injector.motion(heldButtons: [MonioButton.middle.number]).0 == .otherMouseDragged)
+  }
+
+  /// Only one type can be posted, so several held buttons need a defined
+  /// winner rather than whatever the set happens to iterate first.
+  @Test func leftWinsOverRightWinsOverOther() {
+    let all: Set<UInt8> = [
+      MonioButton.left.number, MonioButton.right.number, MonioButton.middle.number,
+    ]
+    #expect(Injector.motion(heldButtons: all).0 == .leftMouseDragged)
+    #expect(
+      Injector.motion(heldButtons: [MonioButton.right.number, MonioButton.middle.number]).0
+        == .rightMouseDragged)
+  }
+
+  /// Buttons are 1-indexed in Monio's vocabulary and 0-indexed in
+  /// CoreGraphics', and getting that wrong sends a side button as the middle
+  /// one.
+  @Test func otherButtonsKeepTheirIdentity() {
+    #expect(Injector.motion(heldButtons: [MonioButton.middle.number]).1 == .center)
+    #expect(Injector.motion(heldButtons: [4]).1.rawValue == 3)
+  }
+}
+
 @Suite("Displays")
 struct DisplayTests {
   /// Display enumeration needs no permission, which makes it the one OS call
@@ -147,5 +188,28 @@ struct DisplayTests {
       #expect(display.scale >= 1.0)
     }
     #expect(Set(displays.map(\.id)).count == displays.count)
+  }
+
+  /// Point-to-display uses one definition of "contains" so that two machines
+  /// cannot disagree about which pixel is the last one on a screen — a
+  /// disagreement there is a pointer that crosses early on one side and late on
+  /// the other.
+  @Test func aPointResolvesToTheDisplayHoldingIt() {
+    let left = MonioDisplay(
+      id: 1, bounds: CGRect(x: 0, y: 0, width: 1440, height: 900), scale: 2, isPrimary: true)
+    let right = MonioDisplay(
+      id: 2, bounds: CGRect(x: 1440, y: 0, width: 1920, height: 1080), scale: 1,
+      isPrimary: false)
+    let screens = [left, right]
+
+    #expect(MonioDisplays.display(at: CGPoint(x: 10, y: 10), in: screens) == left)
+    #expect(MonioDisplays.display(at: CGPoint(x: 1500, y: 10), in: screens) == right)
+    // The shared boundary belongs to exactly one of them: 1439 is the last
+    // column of the left screen, 1440 the first of the right.
+    #expect(MonioDisplays.display(at: CGPoint(x: 1439, y: 10), in: screens) == left)
+    #expect(MonioDisplays.display(at: CGPoint(x: 1440, y: 10), in: screens) == right)
+    // Off every screen is a real answer, not a fallback to the primary.
+    #expect(MonioDisplays.display(at: CGPoint(x: -1, y: 10), in: screens) == nil)
+    #expect(MonioDisplays.display(at: CGPoint(x: 10, y: 1000), in: screens) == nil)
   }
 }

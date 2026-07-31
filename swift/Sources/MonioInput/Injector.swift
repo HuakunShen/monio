@@ -35,6 +35,10 @@ public final class Injector: @unchecked Sendable {
   /// down` produces a lowercase `a` unless the second event also says shift is
   /// held.
   private var heldFlags: CGEventFlags = []
+  /// Which buttons this injector has pressed and not released. Needed because
+  /// motion during a press is a *different event type*, not a flag — see
+  /// `movePointer`.
+  private var heldButtons: Set<UInt8> = []
 
   public init() {
     // `.hidSystemState` rather than `.privateState`: private-state events do
@@ -108,20 +112,56 @@ public final class Injector: @unchecked Sendable {
     }
     lock.lock()
     event.flags = heldFlags
+    if pressed {
+      heldButtons.insert(button.number)
+    } else {
+      heldButtons.remove(button.number)
+    }
     lock.unlock()
     post(event)
   }
 
   /// Move the cursor to an absolute point.
+  ///
+  /// Motion while a button is held must be posted as a *drag*, not as a move.
+  /// macOS does not derive that from button state: an application watching for
+  /// `mouseDragged:` — which is every application that supports selecting text,
+  /// dragging a file, or moving a window — receives nothing at all from a
+  /// `mouseMoved` posted mid-press. The remote user would see the button go
+  /// down, the cursor travel, the button come up, and no drag happen.
   public func movePointer(to location: CGPoint) throws {
+    lock.lock()
+    let (type, cgButton) = Self.motion(heldButtons: heldButtons)
+    let flags = heldFlags
+    lock.unlock()
+
     guard
       let event = CGEvent(
-        mouseEventSource: source, mouseType: .mouseMoved, mouseCursorPosition: location,
-        mouseButton: .left)
+        mouseEventSource: source, mouseType: type, mouseCursorPosition: location,
+        mouseButton: cgButton)
     else {
       throw InjectError.eventCreationFailed
     }
+    event.flags = flags
     post(event)
+  }
+
+  /// The event type that carries pointer motion, given what is currently held.
+  ///
+  /// Left wins over right wins over any other button when several are down —
+  /// only one type can be posted, and that is the order in which applications
+  /// treat a drag as meaningful.
+  static func motion(heldButtons: Set<UInt8>) -> (CGEventType, CGMouseButton) {
+    if heldButtons.contains(MonioButton.left.number) {
+      return (.leftMouseDragged, .left)
+    }
+    if heldButtons.contains(MonioButton.right.number) {
+      return (.rightMouseDragged, .right)
+    }
+    if let other = heldButtons.min() {
+      return (.otherMouseDragged, CGMouseButton(rawValue: UInt32(other - 1)) ?? .center)
+    }
+    return (.mouseMoved, .left)
   }
 
   public func scroll(deltaX: Double, deltaY: Double) throws {
@@ -144,13 +184,17 @@ public final class Injector: @unchecked Sendable {
     CGWarpMouseCursorPosition(location)
   }
 
-  /// Forget any modifier state this injector believes it is holding.
+  /// Forget any modifier or button state this injector believes it is holding.
   ///
-  /// The caller is responsible for actually releasing the keys first; this only
-  /// clears the flags that would otherwise be stamped onto the next event.
-  public func resetModifiers() {
+  /// The caller is responsible for actually releasing them first; this only
+  /// clears the bookkeeping that would otherwise be applied to the next event.
+  /// Both halves matter: a stale modifier flag is stamped onto an unrelated
+  /// keystroke, and a stale held button turns every later pointer move into a
+  /// drag.
+  public func resetHeldInput() {
     lock.lock()
     heldFlags = []
+    heldButtons = []
     lock.unlock()
   }
 
