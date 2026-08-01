@@ -1,5 +1,6 @@
 //! macOS platform implementation using CGEventTap.
 
+pub mod accessibility;
 mod display;
 mod keycodes;
 mod listen;

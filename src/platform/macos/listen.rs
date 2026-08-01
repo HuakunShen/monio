@@ -440,10 +440,19 @@ pub fn run_hook<H: EventHandler + 'static>(running: &Arc<AtomicBool>, handler: H
             null_mut(),
         )
         .ok_or_else(|| {
-            Error::PermissionDenied(
+            // The tap has ALREADY failed, so this is not a probe — it is the one
+            // moment the answer is known. See `accessibility` for why the API
+            // call rather than a link to System Settings: the head ships inside
+            // an app bundle, and nobody drags a Mach-O out of one.
+            let asked = super::accessibility::prompt_once();
+            Error::PermissionDenied(if asked {
+                "Failed to create event tap. macOS has been asked for Accessibility; \
+                 grant it and CrossCopy will pick it up on the next attempt."
+                    .into()
+            } else {
                 "Failed to create event tap. Make sure Accessibility permissions are granted."
-                    .into(),
-            )
+                    .to_string()
+            })
         })?;
 
         // Store the tap reference for timeout recovery
@@ -570,10 +579,19 @@ pub fn run_grab_hook<H: GrabHandler + 'static>(
             null_mut(),
         )
         .ok_or_else(|| {
-            Error::PermissionDenied(
+            // The tap has ALREADY failed, so this is not a probe — it is the one
+            // moment the answer is known. See `accessibility` for why the API
+            // call rather than a link to System Settings: the head ships inside
+            // an app bundle, and nobody drags a Mach-O out of one.
+            let asked = super::accessibility::prompt_once();
+            Error::PermissionDenied(if asked {
+                "Failed to create event tap. macOS has been asked for Accessibility; \
+                 grant it and CrossCopy will pick it up on the next attempt."
+                    .into()
+            } else {
                 "Failed to create event tap. Make sure Accessibility permissions are granted."
-                    .into(),
-            )
+                    .to_string()
+            })
         })?;
 
         // Store the tap reference for timeout recovery
