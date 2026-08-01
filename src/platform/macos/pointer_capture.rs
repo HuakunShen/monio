@@ -240,6 +240,9 @@ mod tests {
             associated: false,
             position_restored: false,
             cursor_hidden: true,
+            // Where the cursor is pinned while captured; restoration does not
+            // read it, but a capture always has one.
+            anchor: CGPoint::new(120.0, 80.0),
         };
         let associate_attempts = Cell::new(0);
         let warp_attempts = Cell::new(0);
