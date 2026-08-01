@@ -119,6 +119,29 @@ fn number_to_button(button: i64) -> Button {
     }
 }
 
+/// The device-dependent flag bit that belongs to one modifier keycode.
+///
+/// These are the `NX_DEVICE*` masks from IOKit's event system. Unlike
+/// `MaskShift` and friends they distinguish the left key from the right one,
+/// which is the whole point: a pair sharing one mask makes the first release
+/// invisible while the second is still held.
+///
+/// `None` for keys that have no device-specific bit — Caps Lock and Fn — whose
+/// general mask is unambiguous anyway because they are not a pair.
+fn device_flag_for_keycode(code: u16) -> Option<u64> {
+    Some(match code {
+        0x38 => 0x0000_0002, // NX_DEVICELSHIFTKEYMASK
+        0x3C => 0x0000_0004, // NX_DEVICERSHIFTKEYMASK
+        0x3B => 0x0000_0001, // NX_DEVICELCTLKEYMASK
+        0x3E => 0x0000_2000, // NX_DEVICERCTLKEYMASK
+        0x3A => 0x0000_0020, // NX_DEVICELALTKEYMASK
+        0x3D => 0x0000_0040, // NX_DEVICERALTKEYMASK
+        0x37 => 0x0000_0008, // NX_DEVICELCMDKEYMASK
+        0x36 => 0x0000_0010, // NX_DEVICERCMDKEYMASK
+        _ => return None,
+    })
+}
+
 fn mouse_motion_event(cg_event: &CGEvent, dragged: bool) -> Event {
     let point = CGEvent::location(Some(cg_event));
     let delta_x =
@@ -226,50 +249,30 @@ unsafe fn convert_event(event_type: CGEventType, cg_event: NonNull<CGEvent>) -> 
             let key = keycode_to_key(code as u16);
             let flags = CGEvent::flags(Some(cg_event.as_ref()));
 
-            // Determine if this is a press or release based on flag changes
-            let mut last_flags = LAST_FLAGS.lock().ok()?;
-            let is_press = if flags.contains(CGEventFlags::MaskShift)
-                && !last_flags.contains(CGEventFlags::MaskShift)
-            {
-                *last_flags = flags;
-                true
-            } else if !flags.contains(CGEventFlags::MaskShift)
-                && last_flags.contains(CGEventFlags::MaskShift)
-            {
-                *last_flags = flags;
-                false
-            } else if flags.contains(CGEventFlags::MaskControl)
-                && !last_flags.contains(CGEventFlags::MaskControl)
-            {
-                *last_flags = flags;
-                true
-            } else if !flags.contains(CGEventFlags::MaskControl)
-                && last_flags.contains(CGEventFlags::MaskControl)
-            {
-                *last_flags = flags;
-                false
-            } else if flags.contains(CGEventFlags::MaskAlternate)
-                && !last_flags.contains(CGEventFlags::MaskAlternate)
-            {
-                *last_flags = flags;
-                true
-            } else if !flags.contains(CGEventFlags::MaskAlternate)
-                && last_flags.contains(CGEventFlags::MaskAlternate)
-            {
-                *last_flags = flags;
-                false
-            } else if flags.contains(CGEventFlags::MaskCommand)
-                && !last_flags.contains(CGEventFlags::MaskCommand)
-            {
-                *last_flags = flags;
-                true
-            } else if !flags.contains(CGEventFlags::MaskCommand)
-                && last_flags.contains(CGEventFlags::MaskCommand)
-            {
-                *last_flags = flags;
-                false
-            } else {
-                return None;
+            // Ask about THIS key's own bit, not the general mask.
+            //
+            // The general masks (`MaskShift`, `MaskControl`, …) are shared by
+            // the left and right half of each pair, so while one half is held
+            // the mask stays set and the other half's release is unreadable.
+            // That is the mechanism behind a modifier that sticks on a remote
+            // machine — measured on 2026-08-01, where releasing Shift left the
+            // far Mac typing capitals forever.
+            //
+            // macOS also publishes device-dependent bits (the `NX_DEVICE*`
+            // masks), which say exactly which physical key is down. Testing the
+            // bit that belongs to the keycode in hand is exact, needs no
+            // remembered previous state, and cannot be confused by the other
+            // half of the pair.
+            let bit = device_flag_for_keycode(code as u16);
+            let is_press = match bit {
+                Some(bit) => flags.0 & bit != 0,
+                // No device-specific bit exists for these, so the general mask
+                // IS the whole truth for them.
+                None => match code {
+                    0x39 => flags.contains(CGEventFlags::MaskAlphaShift), // Caps Lock
+                    0x3F => flags.contains(CGEventFlags::MaskSecondaryFn), // Fn
+                    _ => return None,
+                },
             };
 
             if is_press {
@@ -676,6 +679,42 @@ mod tests {
                 injector: InjectorIdentity::ThisMonioSession,
             }
         );
+    }
+
+    /// Left and right must be distinguishable, or the release of one is
+    /// invisible while the other is held — the mechanism behind a modifier that
+    /// sticks on a remote machine.
+    #[test]
+    fn each_half_of_a_modifier_pair_has_its_own_bit() {
+        let left = device_flag_for_keycode(0x38).expect("left shift");
+        let right = device_flag_for_keycode(0x3C).expect("right shift");
+        assert_ne!(left, right, "a shared bit is exactly the bug");
+        assert_eq!(left & right, 0, "the halves must not overlap");
+
+        for (a, b) in [(0x3B, 0x3E), (0x3A, 0x3D), (0x37, 0x36)] {
+            let a = device_flag_for_keycode(a).expect("left half");
+            let b = device_flag_for_keycode(b).expect("right half");
+            assert_eq!(a & b, 0, "modifier pair shares a bit");
+        }
+    }
+
+    /// Holding one half must not make the other half look held.
+    #[test]
+    fn one_half_held_does_not_mask_the_other_half_s_release() {
+        let left = device_flag_for_keycode(0x38).unwrap();
+        let right = device_flag_for_keycode(0x3C).unwrap();
+        // Both down, then the LEFT one comes up: flags still carry right.
+        let after_left_release = right;
+        assert_eq!(after_left_release & left, 0, "left reads as released");
+        assert_ne!(after_left_release & right, 0, "right still reads as held");
+    }
+
+    /// Caps Lock and Fn are not pairs, so the general mask is the whole truth
+    /// and they deliberately have no device bit.
+    #[test]
+    fn unpaired_modifiers_have_no_device_bit() {
+        assert!(device_flag_for_keycode(0x39).is_none(), "caps lock");
+        assert!(device_flag_for_keycode(0x3F).is_none(), "fn");
     }
 
     #[test]

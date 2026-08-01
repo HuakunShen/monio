@@ -18,6 +18,38 @@ use super::{keycodes::key_to_keycode, provenance};
 /// Track the current modifier flags for simulation
 static SIM_FLAGS: Mutex<CGEventFlags> = Mutex::new(CGEventFlags(0));
 
+/// Buttons this process has pressed and not released.
+///
+/// Needed because motion during a press is a *different event type* on macOS,
+/// not a flag — see [`create_mouse_move_event`]. Mirrors `heldButtons` in the
+/// Swift injector, which fixed the same defect there in `1f16cdc`.
+static SIM_BUTTONS: Mutex<Vec<u8>> = Mutex::new(Vec::new());
+
+fn held_buttons() -> Vec<u8> {
+    SIM_BUTTONS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone()
+}
+
+/// The event type that carries pointer motion, given what is currently held.
+///
+/// Left wins over right wins over any other button when several are down: only
+/// one type can be posted, and that is the order in which applications treat
+/// them as the primary drag.
+fn motion_event_type(held: &[u8]) -> (CGEventType, CGMouseButton) {
+    if held.contains(&Button::Left.number()) {
+        (CGEventType::LeftMouseDragged, CGMouseButton::Left)
+    } else if held.contains(&Button::Right.number()) {
+        (CGEventType::RightMouseDragged, CGMouseButton::Right)
+    } else if let Some(other) = held.first() {
+        let _ = other;
+        (CGEventType::OtherMouseDragged, CGMouseButton::Center)
+    } else {
+        (CGEventType::MouseMoved, CGMouseButton::Left)
+    }
+}
+
 fn post_event(event: &CGEvent) -> Result<()> {
     provenance::tag_event(event)?;
     CGEvent::post(CGEventTapLocation::HIDEventTap, Some(event));
@@ -41,20 +73,37 @@ fn get_current_mouse_location() -> Result<CGPoint> {
     }
 }
 
+/// Build the event that carries pointer motion to `point`.
+///
+/// Motion while a button is held must be posted as a **drag**, not as a move.
+/// macOS does not derive that from button state: an application watching for
+/// `mouseDragged:` — which is every application that supports selecting text,
+/// dragging a file, or moving a window — receives nothing at all from a
+/// `mouseMoved` posted mid-press. The remote user sees the button go down, the
+/// cursor travel, the button come up, and no drag happen.
+///
+/// Measured on 2026-08-01 across two Macs running CrossFlow: text could not be
+/// selected on the far machine at all, only clicked. The Swift injector had
+/// already been fixed for exactly this (`1f16cdc`); this is the Rust half.
+///
+/// The held modifier flags are applied for the same class of reason: an
+/// application reading `NSEvent.modifierFlags` during a drag sees what the
+/// event carries, not what some other process believes is held.
 fn create_mouse_move_event(
     point: CGPoint,
     relative: Option<(f64, f64)>,
 ) -> Result<CFRetained<CGEvent>> {
+    let held = held_buttons();
+    let (event_type, cg_button) = motion_event_type(&held);
+    let flags = *SIM_FLAGS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     unsafe {
         let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
             .ok_or_else(|| Error::SimulateFailed("Failed to create event source".into()))?;
-        let event = CGEvent::new_mouse_event(
-            Some(&source),
-            CGEventType::MouseMoved,
-            point,
-            CGMouseButton::Left,
-        )
-        .ok_or_else(|| Error::SimulateFailed("Failed to create mouse event".into()))?;
+        let event = CGEvent::new_mouse_event(Some(&source), event_type, point, cg_button)
+            .ok_or_else(|| Error::SimulateFailed("Failed to create mouse event".into()))?;
+        CGEvent::set_flags(Some(&event), flags);
 
         if let Some((delta_x, delta_y)) = relative {
             CGEvent::set_integer_value_field(
@@ -287,6 +336,16 @@ pub fn mouse_press(button: Button) -> Result<()> {
 
         post_event(&event)?;
     }
+    // Recorded AFTER the post so a failed press does not leave a phantom held
+    // button making every later move a drag.
+    {
+        let mut held = SIM_BUTTONS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if !held.contains(&button.number()) {
+            held.push(button.number());
+        }
+    }
     Ok(())
 }
 
@@ -318,6 +377,13 @@ pub fn mouse_release(button: Button) -> Result<()> {
 
         post_event(&event)?;
     }
+    // Cleared unconditionally: a release that failed to post still means this
+    // process is no longer holding the button, and leaving it recorded would
+    // turn every subsequent move into a drag nobody asked for.
+    SIM_BUTTONS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .retain(|held| *held != button.number());
     Ok(())
 }
 
@@ -388,5 +454,46 @@ mod tests {
             CGEvent::integer_value_field(Some(&event), CGEventField::MouseEventDeltaY,),
             6
         );
+    }
+}
+
+#[cfg(test)]
+mod drag_tests {
+    use super::*;
+
+    /// Motion while a button is held is a *different event type* on macOS, not
+    /// a flag. An application watching `mouseDragged:` — every application that
+    /// supports selecting text or dragging a file — receives nothing at all
+    /// from a `mouseMoved` posted mid-press.
+    ///
+    /// Measured across two Macs on 2026-08-01: text on the far machine could be
+    /// clicked but never selected.
+    #[test]
+    fn motion_with_no_button_held_is_a_move() {
+        let (event_type, _) = motion_event_type(&[]);
+        assert_eq!(event_type, CGEventType::MouseMoved);
+    }
+
+    #[test]
+    fn motion_while_the_left_button_is_held_is_a_drag() {
+        let (event_type, button) = motion_event_type(&[Button::Left.number()]);
+        assert_eq!(event_type, CGEventType::LeftMouseDragged);
+        assert_eq!(button, CGMouseButton::Left);
+    }
+
+    #[test]
+    fn motion_while_the_right_button_is_held_is_a_right_drag() {
+        let (event_type, button) = motion_event_type(&[Button::Right.number()]);
+        assert_eq!(event_type, CGEventType::RightMouseDragged);
+        assert_eq!(button, CGMouseButton::Right);
+    }
+
+    /// Only one type can be posted, so several buttons down needs a defined
+    /// winner — left, because that is the one applications treat as the primary
+    /// drag.
+    #[test]
+    fn the_left_button_wins_when_several_are_held() {
+        let (event_type, _) = motion_event_type(&[Button::Right.number(), Button::Left.number()]);
+        assert_eq!(event_type, CGEventType::LeftMouseDragged);
     }
 }
