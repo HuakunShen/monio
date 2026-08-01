@@ -32,6 +32,71 @@ fn held_buttons() -> Vec<u8> {
         .clone()
 }
 
+/// The last press per button: which button, when, where, and what click count
+/// it carried.
+static SIM_CLICKS: Mutex<Vec<(u8, std::time::Instant, f64, f64, i64)>> = Mutex::new(Vec::new());
+
+/// macOS's default double-click interval. Reading the user's own setting needs
+/// AppKit, which this crate deliberately does not link; the default is what the
+/// overwhelming majority of machines run, and being slightly conservative costs
+/// a missed double-click rather than a spurious one.
+const DOUBLE_CLICK_INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// How far the pointer may move between two clicks and still be "the same
+/// place". macOS is similarly forgiving; a hand on a mouse never lands twice on
+/// exactly one pixel.
+const DOUBLE_CLICK_SLOP: f64 = 4.0;
+
+/// What click count this press should carry: 1, 2, 3, …
+///
+/// **Why this has to exist.** macOS does not infer double-clicks from a stream
+/// of independent clicks — the *event* carries `kCGMouseEventClickState`, and an
+/// injector that never sets it produces events every application reads as a
+/// series of single clicks. Measured on 2026-08-01: dragging to select text
+/// worked, and double-click-to-select-a-word and triple-click-to-select-a-line
+/// did nothing at all, on a machine being driven through CrossFlow.
+///
+/// Reconstructed here rather than forwarded from the sending machine because
+/// the count belongs to the machine the click lands on: it is that machine's
+/// double-click interval, and that machine's applications, that decide what a
+/// double-click means. Over a LAN the jitter between two clicks is a rounding
+/// error against a 500 ms window.
+fn next_click_state(button: u8, x: f64, y: f64, now: std::time::Instant) -> i64 {
+    let mut clicks = SIM_CLICKS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let state = match clicks.iter().find(|entry| entry.0 == button) {
+        Some((_, when, last_x, last_y, count))
+            if now.duration_since(*when) <= DOUBLE_CLICK_INTERVAL
+                && (x - last_x).abs() <= DOUBLE_CLICK_SLOP
+                && (y - last_y).abs() <= DOUBLE_CLICK_SLOP =>
+        {
+            // Beyond a triple click macOS keeps counting, and so does this:
+            // applications that care read `== 2` or `== 3` and ignore the rest.
+            count.saturating_add(1)
+        }
+        _ => 1,
+    };
+    clicks.retain(|entry| entry.0 != button);
+    clicks.push((button, now, x, y, state));
+    state
+}
+
+/// The click count the matching press carried, without advancing it.
+///
+/// A release must repeat its press's count. Recomputing it would make a
+/// double-click's mouse-up claim to be click three, and an application pairing
+/// down with up by click state would see two unrelated events.
+fn current_click_state(button: u8) -> i64 {
+    SIM_CLICKS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .iter()
+        .find(|entry| entry.0 == button)
+        .map(|entry| entry.4)
+        .unwrap_or(1)
+}
+
 /// The event type that carries pointer motion, given what is currently held.
 ///
 /// Left wins over right wins over any other button when several are down: only
@@ -334,6 +399,19 @@ pub fn mouse_press(button: Button) -> Result<()> {
             );
         }
 
+        // Without this every injected click is a *first* click, and no
+        // application ever sees a double or triple. See `next_click_state`.
+        CGEvent::set_integer_value_field(
+            Some(&event),
+            CGEventField::MouseEventClickState,
+            next_click_state(
+                button.number(),
+                point.x,
+                point.y,
+                std::time::Instant::now(),
+            ),
+        );
+
         post_event(&event)?;
     }
     // Recorded AFTER the post so a failed press does not leave a phantom held
@@ -374,6 +452,13 @@ pub fn mouse_release(button: Button) -> Result<()> {
                 (button.number() - 1) as i64,
             );
         }
+
+        // The same count its press carried, not a fresh one.
+        CGEvent::set_integer_value_field(
+            Some(&event),
+            CGEventField::MouseEventClickState,
+            current_click_state(button.number()),
+        );
 
         post_event(&event)?;
     }
@@ -460,6 +545,7 @@ mod tests {
 #[cfg(test)]
 mod drag_tests {
     use super::*;
+    use std::time::Duration;
 
     /// Motion while a button is held is a *different event type* on macOS, not
     /// a flag. An application watching `mouseDragged:` — every application that
@@ -495,5 +581,62 @@ mod drag_tests {
     fn the_left_button_wins_when_several_are_held() {
         let (event_type, _) = motion_event_type(&[Button::Right.number(), Button::Left.number()]);
         assert_eq!(event_type, CGEventType::LeftMouseDragged);
+    }
+
+    /// macOS does not infer a double-click from two single clicks — the event
+    /// carries the count, and an injector that never sets it makes
+    /// double-click-to-select-a-word and triple-click-to-select-a-line silently
+    /// impossible. Measured through CrossFlow on 2026-08-01: dragging to select
+    /// text worked, double and triple click did nothing at all.
+    ///
+    /// `SIM_CLICKS` is process-global, so these run as one test rather than
+    /// several that would race each other through it.
+    #[test]
+    fn clicks_in_the_same_place_in_quick_succession_count_up() {
+        let button = Button::Left.number();
+        let start = std::time::Instant::now();
+
+        assert_eq!(next_click_state(button, 100.0, 100.0, start), 1);
+        assert_eq!(
+            next_click_state(button, 100.0, 100.0, start + Duration::from_millis(120)),
+            2,
+            "a second click in the same place is a double click"
+        );
+        assert_eq!(
+            next_click_state(button, 100.0, 100.0, start + Duration::from_millis(240)),
+            3,
+            "a third is a triple click, which is what selects a line"
+        );
+
+        // A release repeats its press's count rather than advancing it.
+        assert_eq!(current_click_state(button), 3);
+        assert_eq!(current_click_state(button), 3, "reading must not advance it");
+
+        // Too slow: a deliberate second click much later is a new first click.
+        assert_eq!(
+            next_click_state(button, 100.0, 100.0, start + Duration::from_secs(5)),
+            1,
+            "past the double-click interval this starts over"
+        );
+
+        // Too far: two quick clicks in different places are two single clicks,
+        // which is what stops a fast mouse sweep from selecting words.
+        let later = start + Duration::from_secs(5);
+        assert_eq!(
+            next_click_state(button, 400.0, 100.0, later + Duration::from_millis(50)),
+            1,
+            "a click far from the last one starts over"
+        );
+
+        // Buttons are counted independently: a right click does not advance the
+        // left button's run.
+        let right = Button::Right.number();
+        let base = later + Duration::from_millis(100);
+        assert_eq!(next_click_state(right, 400.0, 100.0, base), 1);
+        assert_eq!(
+            next_click_state(button, 400.0, 100.0, base + Duration::from_millis(50)),
+            2,
+            "the left button's own run continued across a right click"
+        );
     }
 }
