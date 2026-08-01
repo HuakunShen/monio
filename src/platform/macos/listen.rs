@@ -198,6 +198,28 @@ unsafe extern "C-unwind" fn event_callback(
 
     // Check if we're in grab mode
     if GRAB_MODE.load(Ordering::SeqCst) {
+        // Put the cursor back before anything else looks at this movement.
+        //
+        // A consumed event is deleted from what applications receive, but the
+        // window server has already moved the cursor by the time the tap sees
+        // it — which is why suppression alone freezes the keyboard and not the
+        // pointer. `CGAssociateMouseAndMouseCursorPosition(false)` is supposed
+        // to cover this and is documented to work only for a FOREGROUND
+        // application; a background agent gets a success return and no
+        // disassociation. So the cursor is pinned by warping it back, per
+        // movement. See `pointer_capture::recenter_captured_pointer`.
+        //
+        // A no-op unless a relative capture is active, and free of events, so it
+        // cannot retrigger this callback.
+        if matches!(
+            event_type,
+            CGEventType::MouseMoved
+                | CGEventType::LeftMouseDragged
+                | CGEventType::RightMouseDragged
+                | CGEventType::OtherMouseDragged
+        ) {
+            super::pointer_capture::recenter_captured_pointer();
+        }
         // Grab mode: handler decides whether to consume event
         if let Some(evt) = event
             && let Ok(guard) = GRAB_HANDLER.lock()
