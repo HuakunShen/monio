@@ -68,6 +68,12 @@ pub fn prompt_once() -> bool {
         return false;
     };
     let yes = CFBoolean::new(true);
+    // `&*yes` derefs the `CFRetained` to `&CFBoolean`, which is what
+    // `from_slices` wants. Clippy reads it as a redundant reborrow and suggests
+    // `&[yes]`; that loses the deref and leaves `V` unconstrained, so the
+    // suggestion does not compile (E0283). Silenced rather than restructured —
+    // spelling out the generic here would be noisier than the lint.
+    #[allow(clippy::borrow_deref_ref)]
     let options = CFDictionary::from_slices(&[key], &[&*yes]);
     unsafe { AXIsProcessTrustedWithOptions(&*options as *const _ as *const c_void) };
     true

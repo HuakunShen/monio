@@ -32,9 +32,14 @@ fn held_buttons() -> Vec<u8> {
         .clone()
 }
 
-/// The last press per button: which button, when, where, and what click count
-/// it carried.
-static SIM_CLICKS: Mutex<Vec<(u8, std::time::Instant, f64, f64, i64)>> = Mutex::new(Vec::new());
+/// One remembered press: which button, when, where, and what click count it
+/// carried. Named rather than left as a bare tuple so the five positional
+/// fields are readable at the use sites — and so `clippy::type_complexity`
+/// stops failing the macOS build under `-D warnings`.
+type SimClick = (u8, std::time::Instant, f64, f64, i64);
+
+/// The last press per button.
+static SIM_CLICKS: Mutex<Vec<SimClick>> = Mutex::new(Vec::new());
 
 /// macOS's default double-click interval. Reading the user's own setting needs
 /// AppKit, which this crate deliberately does not link; the default is what the
