@@ -82,6 +82,7 @@ pub mod state;
 pub mod statistics;
 
 mod platform;
+pub mod text;
 
 // Re-exports
 pub use display::{
@@ -105,6 +106,9 @@ pub use platform::{
     key_press, key_release, key_tap, mouse_click, mouse_move, mouse_move_relative, mouse_position,
     mouse_press, mouse_release, simulate,
 };
+/// Committing text, which every platform's `simulate` used to drop on the
+/// floor. See [`text`] for why it is a separate entry point.
+pub use text::type_text;
 
 #[cfg(all(test, not(target_os = "windows")))]
 mod relative_pointer_capture_api_tests {
