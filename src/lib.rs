@@ -81,8 +81,9 @@ pub mod state;
 #[cfg(feature = "statistics")]
 pub mod statistics;
 
-mod platform;
 pub mod gesture;
+pub mod media;
+mod platform;
 pub mod scroll;
 pub mod text;
 
@@ -104,20 +105,23 @@ pub use recorder::{EventRecorder, RecordedEvent, Recording};
 pub use statistics::{EventStatistics, StatisticsCollector};
 
 // Simulation functions
+/// Pinch and twist, which have no public API on any platform and are therefore
+/// somebody's undocumented field numbers. See [`gesture`] for whose.
+pub use gesture::{GesturePhase, magnify, rotate, smart_magnify};
+/// Volume, brightness and playback — the keys the *system* consumes, and the
+/// reason a volume change is visible rather than silent. See [`media`].
+pub use media::{MediaKey, media_key};
 pub use platform::{
     key_press, key_release, key_tap, mouse_click, mouse_move, mouse_move_relative, mouse_position,
     mouse_press, mouse_release, simulate,
 };
-/// Committing text, which every platform's `simulate` used to drop on the
-/// floor. See [`text`] for why it is a separate entry point.
-pub use text::type_text;
 /// Scrolling as a gesture — two axes and a phase — rather than as one notch at
 /// a time. See [`scroll`] for what a phase does and, more usefully, what it
 /// does not.
 pub use scroll::{ScrollPhase, scroll};
-/// Pinch and twist, which have no public API on any platform and are therefore
-/// somebody's undocumented field numbers. See [`gesture`] for whose.
-pub use gesture::{GesturePhase, magnify, rotate, smart_magnify};
+/// Committing text, which every platform's `simulate` used to drop on the
+/// floor. See [`text`] for why it is a separate entry point.
+pub use text::type_text;
 
 #[cfg(all(test, not(target_os = "windows")))]
 mod relative_pointer_capture_api_tests {
