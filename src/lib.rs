@@ -82,6 +82,7 @@ pub mod state;
 pub mod statistics;
 
 mod platform;
+pub mod gesture;
 pub mod scroll;
 pub mod text;
 
@@ -114,6 +115,9 @@ pub use text::type_text;
 /// a time. See [`scroll`] for what a phase does and, more usefully, what it
 /// does not.
 pub use scroll::{ScrollPhase, scroll};
+/// Pinch and twist, which have no public API on any platform and are therefore
+/// somebody's undocumented field numbers. See [`gesture`] for whose.
+pub use gesture::{GesturePhase, magnify, rotate, smart_magnify};
 
 #[cfg(all(test, not(target_os = "windows")))]
 mod relative_pointer_capture_api_tests {

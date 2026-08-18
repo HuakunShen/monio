@@ -2,6 +2,7 @@
 
 pub mod accessibility;
 mod display;
+mod gesture;
 mod keycodes;
 mod listen;
 mod pointer_capture;
@@ -17,5 +18,6 @@ pub use simulate::{
     key_press, key_release, key_tap, mouse_click, mouse_move, mouse_move_relative, mouse_position,
     mouse_press, mouse_release, simulate,
 };
+pub use gesture::{magnify, rotate, smart_magnify};
 pub use scroll::scroll;
 pub use text::type_text;
