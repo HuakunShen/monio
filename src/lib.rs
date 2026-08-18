@@ -82,6 +82,7 @@ pub mod state;
 pub mod statistics;
 
 mod platform;
+pub mod scroll;
 pub mod text;
 
 // Re-exports
@@ -109,6 +110,10 @@ pub use platform::{
 /// Committing text, which every platform's `simulate` used to drop on the
 /// floor. See [`text`] for why it is a separate entry point.
 pub use text::type_text;
+/// Scrolling as a gesture — two axes and a phase — rather than as one notch at
+/// a time. See [`scroll`] for what a phase does and, more usefully, what it
+/// does not.
+pub use scroll::{ScrollPhase, scroll};
 
 #[cfg(all(test, not(target_os = "windows")))]
 mod relative_pointer_capture_api_tests {

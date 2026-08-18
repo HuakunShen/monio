@@ -6,6 +6,7 @@ mod keycodes;
 mod listen;
 mod pointer_capture;
 mod provenance;
+mod scroll;
 mod simulate;
 mod text;
 
@@ -16,4 +17,5 @@ pub use simulate::{
     key_press, key_release, key_tap, mouse_click, mouse_move, mouse_move_relative, mouse_position,
     mouse_press, mouse_release, simulate,
 };
+pub use scroll::scroll;
 pub use text::type_text;
