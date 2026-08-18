@@ -72,12 +72,20 @@ mod hid_type {
 
 /// Pinch by a fraction of the current scale.
 pub fn magnify(amount: f64, phase: GesturePhase) -> Result<()> {
-    post(hid_type::ZOOM, Some((field::MAGNIFICATION, amount)), Some(phase))
+    post(
+        hid_type::ZOOM,
+        Some((field::MAGNIFICATION, amount)),
+        Some(phase),
+    )
 }
 
 /// Twist, in degrees.
 pub fn rotate(degrees: f64, phase: GesturePhase) -> Result<()> {
-    post(hid_type::ROTATION, Some((field::ROTATION, degrees)), Some(phase))
+    post(
+        hid_type::ROTATION,
+        Some((field::ROTATION, degrees)),
+        Some(phase),
+    )
 }
 
 /// The two-finger double tap: one event, no phase, no amount.
@@ -89,11 +97,7 @@ pub fn smart_magnify() -> Result<()> {
     post(hid_type::ZOOM_TOGGLE, None, None)
 }
 
-fn post(
-    hid: i64,
-    amount: Option<(CGEventField, f64)>,
-    phase: Option<GesturePhase>,
-) -> Result<()> {
+fn post(hid: i64, amount: Option<(CGEventField, f64)>, phase: Option<GesturePhase>) -> Result<()> {
     // No source. A gesture is not attributed to a keyboard or a mouse state,
     // and `CGEventCreate(NULL)` is what both references use.
     let event = CGEvent::new(None)
