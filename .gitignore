@@ -3,3 +3,5 @@
 references/
 TODO.md
 .build
+.DS_Store
+docs
