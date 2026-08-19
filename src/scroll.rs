@@ -1,6 +1,6 @@
 //! Scrolling as a gesture rather than as a series of notches.
 //!
-//! [`scroll`] exists beside `simulate`'s wheel support for the same reason
+//! [`scroll()`] exists beside `simulate`'s wheel support for the same reason
 //! [`crate::text`] exists beside `key_press`: the two describe different things
 //! and an application treats them differently.
 //!

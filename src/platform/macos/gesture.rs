@@ -118,3 +118,37 @@ fn post(hid: i64, amount: Option<(CGEventField, f64)>, phase: Option<GesturePhas
     CGEvent::post(CGEventTapLocation::HIDEventTap, Some(&event));
     Ok(())
 }
+
+impl GesturePhase {
+    /// `IOHIDEventPhaseBits`, from `IOHIDEventTypes.h:620-629`.
+    ///
+    /// Bits rather than an ordinal — `Ended` is 4, not 3 — and a value invented
+    /// by counting would be `Cancelled`.
+    fn bits(self) -> i64 {
+        match self {
+            GesturePhase::Began => 1,
+            GesturePhase::Changed => 2,
+            GesturePhase::Ended => 4,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::GesturePhase;
+
+    /// The one thing that would be silently wrong: `Ended` is a bit, and three
+    /// consecutive integers is the shape a careless reimplementation would
+    /// produce. An application receiving 3 sees `Began | Changed`.
+    #[test]
+    fn the_phases_are_bits_and_not_an_ordinal() {
+        assert_eq!(GesturePhase::Began.bits(), 1);
+        assert_eq!(GesturePhase::Changed.bits(), 2);
+        assert_eq!(GesturePhase::Ended.bits(), 4);
+        assert_eq!(
+            GesturePhase::Began.bits() | GesturePhase::Changed.bits(),
+            3,
+            "3 is a pair of phases, which is why nothing may be numbered 3"
+        );
+    }
+}

@@ -86,11 +86,7 @@ pub fn scroll(delta_x: f64, delta_y: f64, phase: ScrollPhase) -> Result<()> {
 
     let (scroll_phase, momentum_phase) = phase.fields();
 
-    CGEvent::set_integer_value_field(
-        Some(&event),
-        CGEventField::ScrollWheelEventIsContinuous,
-        1,
-    );
+    CGEvent::set_integer_value_field(Some(&event), CGEventField::ScrollWheelEventIsContinuous, 1);
     if scroll_phase != 0 {
         CGEvent::set_integer_value_field(
             Some(&event),
@@ -121,7 +117,10 @@ pub fn scroll(delta_x: f64, delta_y: f64, phase: ScrollPhase) -> Result<()> {
     // The HID tap, unlike text: a scroll *is* hardware-shaped. Nothing about it
     // needs interpreting by a layout or an input method, and posting it
     // upstream is what makes it indistinguishable from the trackpad's own.
-    CGEvent::post(objc2_core_graphics::CGEventTapLocation::HIDEventTap, Some(&event));
+    CGEvent::post(
+        objc2_core_graphics::CGEventTapLocation::HIDEventTap,
+        Some(&event),
+    );
     Ok(())
 }
 
@@ -157,7 +156,11 @@ mod tests {
         for phase in [ScrollPhase::Began, ScrollPhase::Changed, ScrollPhase::Ended] {
             let (scroll, momentum) = phase.fields();
             assert_ne!(scroll, 0, "{phase:?} must carry a scroll phase");
-            assert_eq!(momentum, cg_momentum_phase::NONE, "{phase:?} is not momentum");
+            assert_eq!(
+                momentum,
+                cg_momentum_phase::NONE,
+                "{phase:?} is not momentum"
+            );
         }
         for phase in [
             ScrollPhase::MomentumBegan,
@@ -166,7 +169,11 @@ mod tests {
         ] {
             let (scroll, momentum) = phase.fields();
             assert_eq!(scroll, 0, "{phase:?} has no finger on the glass");
-            assert_ne!(momentum, cg_momentum_phase::NONE, "{phase:?} must be momentum");
+            assert_ne!(
+                momentum,
+                cg_momentum_phase::NONE,
+                "{phase:?} must be momentum"
+            );
         }
         assert_eq!(ScrollPhase::Discrete.fields(), (0, cg_momentum_phase::NONE));
     }

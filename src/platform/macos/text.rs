@@ -104,11 +104,7 @@ fn post_chunk(source: &CGEventSource, units: &[u16]) -> Result<()> {
         // SAFETY: `units` outlives the call, and the function copies the string
         // into the event rather than retaining the pointer.
         unsafe {
-            CGEvent::keyboard_set_unicode_string(
-                Some(&event),
-                units.len() as u64,
-                units.as_ptr(),
-            );
+            CGEvent::keyboard_set_unicode_string(Some(&event), units.len() as u64, units.as_ptr());
         }
 
         // Tagged like every other injected event, so this crate's own hooks can
@@ -157,7 +153,10 @@ mod tests {
                 start = end;
             }
             assert_eq!(rebuilt, text, "chunks must reassemble into the input");
-            assert!(chunks >= units.len().div_ceil(CHUNK), "no chunk exceeds CHUNK");
+            assert!(
+                chunks >= units.len().div_ceil(CHUNK),
+                "no chunk exceeds CHUNK"
+            );
         }
     }
 

@@ -116,7 +116,7 @@ pub use platform::{
     mouse_press, mouse_release, simulate,
 };
 /// Scrolling as a gesture — two axes and a phase — rather than as one notch at
-/// a time. See [`scroll`] for what a phase does and, more usefully, what it
+/// a time. See [`mod@scroll`] for what a phase does and, more usefully, what it
 /// does not.
 pub use scroll::{ScrollPhase, scroll};
 /// Committing text, which every platform's `simulate` used to drop on the

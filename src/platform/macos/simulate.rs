@@ -409,12 +409,7 @@ pub fn mouse_press(button: Button) -> Result<()> {
         CGEvent::set_integer_value_field(
             Some(&event),
             CGEventField::MouseEventClickState,
-            next_click_state(
-                button.number(),
-                point.x,
-                point.y,
-                std::time::Instant::now(),
-            ),
+            next_click_state(button.number(), point.x, point.y, std::time::Instant::now()),
         );
 
         post_event(&event)?;
@@ -615,7 +610,11 @@ mod drag_tests {
 
         // A release repeats its press's count rather than advancing it.
         assert_eq!(current_click_state(button), 3);
-        assert_eq!(current_click_state(button), 3, "reading must not advance it");
+        assert_eq!(
+            current_click_state(button),
+            3,
+            "reading must not advance it"
+        );
 
         // Too slow: a deliberate second click much later is a new first click.
         assert_eq!(

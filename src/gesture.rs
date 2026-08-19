@@ -1,6 +1,6 @@
 //! Pinch and twist — the gestures a trackpad has and a mouse does not.
 //!
-//! Separate from [`crate::scroll`] because they are a different event on the
+//! Separate from [`mod@crate::scroll`] because they are a different event on the
 //! wire and a different thing to an application. A scroll moves content; a
 //! magnification changes its scale, and every macOS application that can zoom
 //! at all reads these events, including ones with no zoom command in any menu.
@@ -47,20 +47,6 @@ pub enum GesturePhase {
     Changed,
     /// Fingers lifted. Usually carries a zero amount.
     Ended,
-}
-
-impl GesturePhase {
-    /// `IOHIDEventPhaseBits`, from `IOHIDEventTypes.h:620-629`.
-    ///
-    /// Bits rather than an ordinal — `Ended` is 4, not 3 — and a value invented
-    /// by counting would be `Cancelled`.
-    pub(crate) fn bits(self) -> i64 {
-        match self {
-            GesturePhase::Began => 1,
-            GesturePhase::Changed => 2,
-            GesturePhase::Ended => 4,
-        }
-    }
 }
 
 /// Pinch, by a fraction of the current scale.
@@ -139,24 +125,4 @@ fn unsupported(what: &str) -> crate::error::Error {
          see this module's documentation",
         std::env::consts::OS,
     ))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::GesturePhase;
-
-    /// The one thing that would be silently wrong: `Ended` is a bit, and three
-    /// consecutive integers is the shape a careless reimplementation would
-    /// produce. An application receiving 3 sees `Began | Changed`.
-    #[test]
-    fn the_phases_are_bits_and_not_an_ordinal() {
-        assert_eq!(GesturePhase::Began.bits(), 1);
-        assert_eq!(GesturePhase::Changed.bits(), 2);
-        assert_eq!(GesturePhase::Ended.bits(), 4);
-        assert_eq!(
-            GesturePhase::Began.bits() | GesturePhase::Changed.bits(),
-            3,
-            "3 is a pair of phases, which is why nothing may be numbered 3"
-        );
-    }
 }
