@@ -19,6 +19,9 @@ A pure Rust cross-platform input hook library with **proper drag detection**.
 - **Display queries**: Get monitor info, DPI scale, system settings (multi-monitor support)
 - **Rust API**: Native platform bindings behind one cross-platform interface
 - **Event simulation**: Programmatically generate absolute or relative keyboard and mouse events
+- **Text input**: Commit arbitrary strings, including what an input method produces (macOS)
+- **Trackpad input**: Phased two-axis scrolling, pinch, rotate and smart zoom (macOS)
+- **Media keys**: Volume, brightness and playback, with the system's on-screen overlay (macOS)
 - **Thread-safe**: Atomic state tracking for reliable button/modifier detection
 
 ## The Problem This Solves
@@ -87,6 +90,15 @@ Install the monio skill so agents can provide usage guidance from this repo:
 ```bash
 npx skills add https://github.com/HuakunShen/monio/skills --skill monio
 ```
+
+### Swift package (Apple platforms)
+
+`swift/` holds **MonioInput**, a native Apple input layer — capture, injection,
+display enumeration and self-injection provenance — that is a sibling of the
+Rust crate rather than a binding to it. The two share a contract (the same
+neutral key vocabulary, the same provenance scheme), not code, so a Swift head
+and a Rust head on the same Mac agree key for key. See
+[`swift/README.md`](swift/README.md).
 
 ## Using monio in practice
 
@@ -274,6 +286,63 @@ fn main() -> monio::Result<()> {
     Ok(())
 }
 ```
+
+### Typing Text (macOS)
+
+`simulate`, `key_tap` and friends inject key *positions*, resolved through the
+active layout. That cannot express what an input method commits: there is no key
+position for `好`. `type_text` is a separate entry point for committed text.
+
+```rust
+monio::type_text("你好 🌍")?;
+```
+
+### Scrolling, Gestures & Media Keys (macOS)
+
+Trackpad-shaped input, which a wheel notch cannot describe:
+
+```rust
+use monio::{
+    magnify, media_key, rotate, scroll, smart_magnify,
+    GesturePhase, MediaKey, ScrollPhase,
+};
+
+fn main() -> monio::Result<()> {
+    // Two-axis scroll carrying its gesture phase, which is what drives
+    // rubber-banding, snapping and smooth versus stepped scrolling.
+    scroll(0.0, -12.0, ScrollPhase::Began)?;
+    scroll(0.0, -30.0, ScrollPhase::Changed)?;
+    scroll(0.0, 0.0, ScrollPhase::Ended)?;
+
+    // Pinch and twist. Neither carries coordinates: the application zooms
+    // around the pointer, so move the cursor first to zoom somewhere specific.
+    magnify(0.1, GesturePhase::Changed)?;
+    rotate(15.0, GesturePhase::Changed)?;
+    smart_magnify()?; // the two-finger double tap
+
+    // Injecting the key rather than setting the level is what draws the
+    // on-screen overlay — often a remote user's only acknowledgement.
+    media_key(MediaKey::VolumeUp)?;
+
+    Ok(())
+}
+```
+
+A scroll phase is a label, not a motor: marking events as momentum does not make
+the system generate any, so a caller that wants a flick to keep going has to
+keep sending.
+
+| API | macOS | Windows | X11 | Wayland |
+| --- | --- | --- | --- | --- |
+| `type_text` | ✅ | ❌ | ❌ | unsolved — libei has no text protocol |
+| `scroll` with phases | ✅ | ❌ | ❌ | ❌ |
+| `magnify` / `rotate` / `smart_magnify` | ✅ | ❌ | ❌ | ❌ |
+| `media_key` | ✅ | ❌ | ❌ | ❌ |
+
+Unimplemented platforms return `Error::NotSupported` naming what the
+implementation would need, rather than silently dropping the call. The
+`monio::text`, `monio::scroll`, `monio::gesture` and `monio::media` module docs
+carry the per-platform detail.
 
 ### Using the Hook Struct (Non-blocking)
 
@@ -535,6 +604,17 @@ absolute location and publishes `MouseEventDeltaX/Y` through
 the same delta fields. `RelativePointerCapture` provides the explicit
 cursor-disassociation lifecycle needed by an unbounded CrossFlow capture
 session; it is not activated by generic `grab()`.
+
+The tap does not probe TCC to report a permission state. When
+`CGEventTapCreate` actually fails, the backend calls
+`AXIsProcessTrustedWithOptions` with the prompt option, which posts the standard
+dialog and registers the calling binary with TCC — so a head inside an
+`.app` bundle gets a Privacy & Security entry without anyone dragging a Mach-O
+out of `Contents/MacOS/`.
+
+macOS also implements the simulation surface no other backend has yet:
+`type_text`, phased `scroll`, `magnify`/`rotate`/`smart_magnify`, and
+`media_key`.
 
 ### Windows
 
