@@ -1,0 +1,72 @@
+---
+title: Introduction
+description: Cross-platform keyboard and pointer input, one Rust API.
+---
+
+Monio is a pure Rust input library for desktop software. It lets you listen to keyboard and mouse events, intercept selected input, simulate actions, and build record/playback tools using native platform backends.
+
+The core Rust library is available on [crates.io](https://crates.io/crates/monio). If you are building with JavaScript or TypeScript, the companion [monio-napi](https://github.com/HuakunShen/monio-napi) project exposes input monitoring to Node.js and Electron; install it from [npm](https://www.npmjs.com/package/monio-napi).
+
+The detail that started it all: **a drag is not a move**. Monio tracks button state and emits `MouseDragged` when the pointer moves with a button held.
+
+## Install
+
+Add the crate to your `Cargo.toml`:
+
+```toml
+[dependencies]
+monio = "0.2"
+```
+
+## Your first input listener
+
+```rust
+use monio::{listen, Event, EventType};
+
+fn main() {
+    listen(|event: &Event| {
+        match event.event_type {
+            EventType::KeyPressed => {
+                if let Some(keyboard) = &event.keyboard {
+                    println!("Key pressed: {:?}", keyboard.key);
+                }
+            }
+            EventType::MouseDragged => {
+                if let Some(mouse) = &event.mouse {
+                    println!("Dragging at ({}, {})", mouse.x, mouse.y);
+                }
+            }
+            _ => {}
+        }
+    }).expect("Failed to start hook");
+}
+```
+
+On macOS, the calling application needs Accessibility permission. On Linux, the default X11 backend requires X11/Xi/Xtst development libraries when building.
+
+## Where to go next
+
+<Cards>
+  <Card title="Understand events" description="Moved vs. dragged, keyboard events, and input origins." href="/docs/events" />
+  <Card title="Listen and grab" description="Observe global input or intercept events before delivery." href="/docs/listen-and-grab" />
+  <Card title="Simulate input" description="Inject keyboard, pointer, text, and gesture actions." href="/docs/simulation" />
+  <Card title="Platform support" description="Backend capabilities and important limitations." href="/docs/platforms" />
+</Cards>
+
+## Optional features
+
+```toml
+# Tokio channel support
+monio = { version = "0.2", features = ["tokio"] }
+
+# Macro recording and playback
+monio = { version = "0.2", features = ["recorder"] }
+
+# Input statistics
+monio = { version = "0.2", features = ["statistics"] }
+
+# Linux evdev backend (X11 and Wayland)
+monio = { version = "0.2", features = ["evdev"], default-features = false }
+```
+
+Monio is Apache-2.0 licensed. See the [source repository](https://github.com/HuakunShen/monio) and [crates.io package](https://crates.io/crates/monio).

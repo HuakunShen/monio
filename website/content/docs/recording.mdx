@@ -1,0 +1,55 @@
+---
+title: Recording & statistics
+description: Capture macros, replay timing, and analyze input patterns.
+---
+
+These capabilities are opt-in Cargo features.
+
+## Record and replay
+
+Enable `recorder`:
+
+```toml
+monio = { version = "0.2", features = ["recorder"] }
+```
+
+Then capture a fixed-duration recording and write it to JSON:
+
+```rust
+use monio::recorder::{EventRecorder, Recording};
+use std::time::Duration;
+
+fn main() -> monio::Result<()> {
+    let recording = EventRecorder::record_for(Duration::from_secs(5))?;
+    recording.save("macro.json")?;
+
+    let recording = Recording::load("macro.json")?;
+    recording.playback()?;
+    recording.playback_with_speed(2.0)?;
+    Ok(())
+}
+```
+
+Playback can retain the original timing or change its speed.
+
+## Input statistics
+
+Enable `statistics`:
+
+```toml
+monio = { version = "0.2", features = ["statistics"] }
+```
+
+```rust
+use monio::statistics::StatisticsCollector;
+use std::time::Duration;
+
+fn main() -> monio::Result<()> {
+    let stats = StatisticsCollector::collect_for(Duration::from_secs(60))?;
+    println!("Typing speed: {:.1} keys/min", stats.keys_per_minute());
+    println!("Mouse distance: {:.0} pixels", stats.total_mouse_distance);
+    Ok(())
+}
+```
+
+The collector can also summarize counts, identify frequently used keys and check continuous-input duration.

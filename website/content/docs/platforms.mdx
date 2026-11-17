@@ -1,0 +1,52 @@
+---
+title: Platform support
+description: Native backends, permissions, and important compatibility details.
+---
+
+Monio offers a common Rust interface, but input privileges and capabilities come from the operating system. Always test on the target desktop and session.
+
+| Platform | Listen | Grab | Simulation | Key notes |
+| --- | --- | --- | --- | --- |
+| macOS | ✅ | ✅ | ✅ | Accessibility permission; richest text/gesture/media APIs |
+| Windows | ✅ | ✅ | ✅ | Low-level hooks; Raw Input during grabbing; UIPI limitations |
+| Linux X11 | ✅ | ✅ | ✅ | XRecord, XGrab + XI2 RawMotion, XTest |
+| Linux evdev | ✅ | ✅ | ✅ | X11 and Wayland; `/dev/input` and `/dev/uinput` access |
+| HarmonyOS PC/2in1 | Compile-checked | Partial | Partial | Input Kit; not yet native device-validated |
+
+## macOS
+
+Monio uses Core Graphics event taps. The process needs Accessibility permission. On hook creation failure, Monio can trigger the normal system permission prompt.
+
+macOS also supports `type_text`, phased scrolling, pinch, rotate, smart zoom, media keys and cursor-independent relative pointer capture.
+
+## Windows
+
+Keyboard and mouse hooks operate in the interactive desktop session. `grab()` combines low-level suppression with mouse Raw Input to expose unclipped relative deltas.
+
+Windows input simulation uses SendInput, whose UIPI restrictions prevent injection into some higher-integrity targets. Secure desktops such as UAC prompts are outside ordinary capture. Host applications should configure PerMonitorV2 DPI awareness.
+
+## Linux X11
+
+The default backend uses XRecord to listen, XGrabKeyboard/XGrabPointer with XI2 RawMotion to grab, and XTest to simulate.
+
+```bash
+sudo apt install libx11-dev libxi-dev libxtst-dev
+```
+
+Grab requires XI2 2.1 or later. In pass-through pointer gestures, X11 may hand the entire gesture back to the receiving application, so the grab callback might not see the intermediate motion or release.
+
+## Linux evdev and Wayland
+
+```toml
+monio = { version = "0.2", features = ["evdev"], default-features = false }
+```
+
+This backend reads `/dev/input/event*`, synthesizes through `/dev/uinput`, and can operate under X11 or Wayland. Device access permissions are required. Wayland compositor behavior around re-injected pass-through events varies: GNOME 46 has been tested, but not every compositor is guaranteed.
+
+The optional `wayland-portal` feature is currently a proof of concept for InputCapture/EIS and is **not** a production replacement for the `listen()` and `grab()` backends.
+
+## HarmonyOS PC/2in1
+
+The Input Kit backend targets API 26.0.0 or newer. Rust target checks have passed, but the backend has not yet been linked, packaged, signed or run on a physical HarmonyOS PC. Keyboard-event suppression can work through its API; mouse and wheel monitoring does not imply mouse-event consumption.
+
+For detailed native acceptance notes, refer to the [upstream README](https://github.com/HuakunShen/monio#platform-notes).

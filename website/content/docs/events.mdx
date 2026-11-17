@@ -1,0 +1,62 @@
+---
+title: Event model
+description: How Monio represents keyboard, pointer and provenance events.
+---
+
+Monio normalizes input into event types that can be handled across supported systems. The difference between pointer movement and dragging is explicit.
+
+## Drag detection
+
+The input sequence
+
+```text
+Button down → Move → Move → Button up
+   Pressed     Dragged  Dragged  Released
+```
+
+emits `MouseDragged` for movement while any mouse button is held. This is useful for drawing, gesture recognition, remote input and drag-and-drop behavior.
+
+## Core event types
+
+| Event type | Meaning |
+| --- | --- |
+| `HookEnabled` | Hook started successfully |
+| `HookDisabled` | Hook stopped |
+| `KeyPressed` | Key down |
+| `KeyReleased` | Key up |
+| `KeyTyped` | Character input after dead-key processing |
+| `MousePressed` | Mouse button down |
+| `MouseReleased` | Mouse button up |
+| `MouseClicked` | Button press and release without movement |
+| `MouseMoved` | Pointer moved with no button held |
+| `MouseDragged` | Pointer moved while a button is held |
+| `MouseWheel` | Wheel movement |
+
+### Relative versus absolute movement
+
+Mouse events expose absolute `x`/`y` coordinates. Supported capture backends also provide `mouse.relative` containing raw or native relative deltas.
+
+```rust
+if let Some(mouse) = &event.mouse {
+    if let Some(relative) = mouse.relative {
+        println!("dx={}, dy={}", relative.delta_x, relative.delta_y);
+    }
+}
+```
+
+Relative deltas are not available on every backend and listening mode. For example, Windows ordinary `listen()` and Linux X11 ordinary `listen()` report no relative delta, while their supported grab paths can provide one.
+
+## Input provenance
+
+Every event has an `origin: InputOrigin`. Monio can tag events injected by the same process session to help a receiver avoid rebroadcasting its own input.
+
+```rust
+fn handle(event: &monio::Event) {
+    if event.is_from_this_monio_session() {
+        return; // avoid an input feedback loop
+    }
+    // Handle the remaining event.
+}
+```
+
+This is a **feedback-loop marker, not an authentication or security boundary**. `InputOrigin::Unknown` means the origin could not be proven; it does not establish that a physical human generated the event.

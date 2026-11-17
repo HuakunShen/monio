@@ -1,0 +1,47 @@
+---
+title: Simulate input
+description: Generate keyboard, mouse, text, scroll and gesture actions.
+---
+
+Monio exposes keyboard and pointer injection functions that use native platform facilities.
+
+## Keyboard and mouse
+
+```rust
+use monio::{
+    key_tap, mouse_click, mouse_move, mouse_move_relative, Button, Key,
+};
+
+fn main() -> monio::Result<()> {
+    mouse_move(100.0, 200.0)?;
+    mouse_move_relative(20.0, -10.0)?;
+    mouse_click(Button::Left)?;
+    key_tap(Key::KeyA)?;
+    Ok(())
+}
+```
+
+The relative motion API matters for remote desktop and pointer capture, especially when the local cursor hits a screen edge.
+
+## Committed text on macOS
+
+Hardware-key injection represents positions on a keyboard, not arbitrary text produced by an input method. On macOS, use `type_text` to commit text:
+
+```rust
+monio::type_text("你好 🌍")?;
+```
+
+## Trackpad-shaped input on macOS
+
+```rust
+use monio::{magnify, rotate, scroll, GesturePhase, ScrollPhase};
+
+scroll(0.0, -12.0, ScrollPhase::Began)?;
+scroll(0.0, -30.0, ScrollPhase::Changed)?;
+scroll(0.0, 0.0, ScrollPhase::Ended)?;
+magnify(0.1, GesturePhase::Changed)?;
+rotate(15.0, GesturePhase::Changed)?;
+# Ok::<(), monio::Error>(())
+```
+
+Phased scrolling, gestures, smart magnification and media-key overlays are currently macOS-specific. Unimplemented platforms return `Error::NotSupported` instead of silently dropping these calls.

@@ -1,0 +1,63 @@
+---
+title: Listen & grab
+description: Observe input passively, or consume selected keyboard and pointer events.
+---
+
+## Passive listening
+
+`listen()` receives events without deciding whether other applications may receive them.
+
+```rust
+use monio::{listen, Event, EventType};
+
+fn main() -> monio::Result<()> {
+    listen(|event: &Event| {
+        if event.event_type == EventType::KeyPressed {
+            println!("{:?}", event.keyboard);
+        }
+    })
+}
+```
+
+## Grabbing events
+
+`grab()` can intercept and suppress input. Return `None` to consume an event, or `Some(event)` to pass it through.
+
+```rust
+use monio::{grab, Event, EventType, Key};
+
+fn main() -> monio::Result<()> {
+    grab(|event: &Event| {
+        if event.event_type == EventType::KeyPressed {
+            if let Some(keyboard) = &event.keyboard {
+                if keyboard.key == Key::F1 {
+                    return None;
+                }
+            }
+        }
+        Some(event.clone())
+    })
+}
+```
+
+The actual capture and pass-through mechanisms differ by operating system. Linux/X11 uses grabs and XI2 RawMotion, whereas the evdev backend can exclusively grab device input and re-inject allowed events through uinput. See [platform support](/docs/platforms).
+
+## Nonblocking channels
+
+Monio has bounded channel APIs that move event handling out of the hook callback.
+
+```rust
+use monio::channel::listen_channel;
+use std::time::Duration;
+
+fn main() -> monio::Result<()> {
+    let (_handle, receiver) = listen_channel(100)?;
+    loop {
+        if let Ok(event) = receiver.recv_timeout(Duration::from_millis(100)) {
+            println!("{:?}", event.event_type);
+        }
+    }
+}
+```
+
+Enable the `tokio` feature to use `listen_async_channel` with Tokio.
