@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 258" role="img" aria-labelledby="title desc">
+  <title id="title">Monio native drag detection</title>
+  <desc id="desc">A pressed mouse button followed by pointer movement is reported as MouseDragged, not MouseMoved, until the mouse is released.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0b1511"/>
+      <stop offset="100%" stop-color="#06100c"/>
+    </linearGradient>
+    <linearGradient id="stroke" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#26664a"/>
+      <stop offset="50%" stop-color="#75e7ae"/>
+      <stop offset="100%" stop-color="#26664a"/>
+    </linearGradient>
+    <marker id="arrow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+      <path d="M0 0 L7 3.5 L0 7 Z" fill="#69dba3"/>
+    </marker>
+  </defs>
+
+  <rect width="1200" height="258" rx="22" fill="url(#background)"/>
+  <rect x=".5" y=".5" width="1199" height="257" rx="21.5" fill="none" stroke="#254236"/>
+  <path d="M0 47 H1200" stroke="#1d3026"/>
+  <circle cx="32" cy="24" r="5" fill="#76d9a6"/>
+  <text x="48" y="29" fill="#a5bdaf" font-size="14" font-family="Inter, system-ui, sans-serif" font-weight="600" letter-spacing="2">INPUT EVENT LIFECYCLE</text>
+  <text x="1168" y="29" fill="#6e8f7d" font-size="12" text-anchor="end" font-family="ui-monospace, SFMono-Regular, monospace">DRAG DETECTION</text>
+
+  <g font-family="Inter, system-ui, sans-serif">
+    <g transform="translate(26 77)">
+      <rect width="262" height="130" rx="15" fill="#15241c" stroke="#375443"/>
+      <rect x="15" y="16" width="63" height="21" rx="10.5" fill="#294433"/>
+      <text x="46.5" y="31" fill="#a9e9c1" font-size="11" font-weight="700" text-anchor="middle" letter-spacing="1">START</text>
+      <text x="17" y="74" fill="#edf6ef" font-size="21" font-weight="650">MousePressed</text>
+      <text x="17" y="102" fill="#94ad9c" font-size="15">Button goes down</text>
+    </g>
+    <g transform="translate(324 77)">
+      <rect width="262" height="130" rx="15" fill="#112d21" stroke="#57ba84" stroke-width="1.5"/>
+      <rect x="15" y="16" width="78" height="21" rx="10.5" fill="#23563a"/>
+      <text x="54" y="31" fill="#abf2c9" font-size="11" font-weight="700" text-anchor="middle" letter-spacing="1">DRAGGING</text>
+      <text x="17" y="74" fill="#eefaf1" font-size="21" font-weight="650">MouseDragged</text>
+      <text x="17" y="102" fill="#9ec6ae" font-size="15">Pointer moves</text>
+    </g>
+    <g transform="translate(622 77)">
+      <rect width="262" height="130" rx="15" fill="#112d21" stroke="#57ba84" stroke-width="1.5"/>
+      <rect x="15" y="16" width="78" height="21" rx="10.5" fill="#23563a"/>
+      <text x="54" y="31" fill="#abf2c9" font-size="11" font-weight="700" text-anchor="middle" letter-spacing="1">DRAGGING</text>
+      <text x="17" y="74" fill="#eefaf1" font-size="21" font-weight="650">MouseDragged</text>
+      <text x="17" y="102" fill="#9ec6ae" font-size="15">Still holding</text>
+    </g>
+    <g transform="translate(920 77)">
+      <rect width="254" height="130" rx="15" fill="#15241c" stroke="#375443"/>
+      <rect x="15" y="16" width="63" height="21" rx="10.5" fill="#294433"/>
+      <text x="46.5" y="31" fill="#a9e9c1" font-size="11" font-weight="700" text-anchor="middle" letter-spacing="1">END</text>
+      <text x="17" y="74" fill="#edf6ef" font-size="21" font-weight="650">MouseReleased</text>
+      <text x="17" y="102" fill="#94ad9c" font-size="15">Button goes up</text>
+    </g>
+  </g>
+
+  <path d="M292 142 H315" stroke="url(#stroke)" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <path d="M590 142 H613" stroke="url(#stroke)" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <path d="M888 142 H911" stroke="url(#stroke)" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <text x="600" y="239" fill="#78a088" font-size="13" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, monospace">Monio tracks button state to distinguish dragging from ordinary motion.</text>
+</svg>

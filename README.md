@@ -1,10 +1,56 @@
-# monio-rs
+<p align="center">
+  <a href="https://huakunshen.github.io/monio/">
+    <img src="assets/monio-hero.webp" alt="Monio: a precision keyboard and mouse connected by luminous input trails" width="100%" />
+  </a>
+</p>
 
-[![Crates.io](https://img.shields.io/crates/v/monio.svg)](https://crates.io/crates/monio)
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/HuakunShen/monio)
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+<h1 align="center">monio</h1>
 
-A pure Rust cross-platform input hook library with **proper drag detection**.
+<p align="center"><strong>Listen. Intercept. Simulate. Replay.</strong></p>
+
+<p align="center">
+  A cross-platform native keyboard &amp; mouse input toolkit for Rust.<br />
+  Global hooks, true drag detection, event injection, recording, and more.
+</p>
+
+<p align="center">
+  <a href="https://crates.io/crates/monio"><img alt="crates.io" src="https://img.shields.io/crates/v/monio?style=flat-square&label=crates.io&color=3da874" /></a>
+  <a href="https://docs.rs/monio"><img alt="docs.rs" src="https://img.shields.io/docsrs/monio?style=flat-square&color=3da874" /></a>
+  <a href="LICENSE"><img alt="Apache 2.0" src="https://img.shields.io/badge/license-Apache--2.0-182920?style=flat-square" /></a>
+  <a href="https://deepwiki.com/HuakunShen/monio"><img alt="DeepWiki" src="https://deepwiki.com/badge.svg" /></a>
+</p>
+
+<p align="center">
+  <a href="https://huakunshen.github.io/monio/"><strong>🌐 Interactive website</strong></a>
+  &nbsp;·&nbsp;
+  <a href="https://docs.rs/monio">API docs</a>
+  &nbsp;·&nbsp;
+  <a href="https://crates.io/crates/monio">Rust crate</a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/HuakunShen/monio-napi">Node.js / Electron bindings</a>
+  &nbsp;·&nbsp;
+  <a href="swift/README.md">Swift package</a>
+</p>
+
+---
+
+| **01 · Observe** | **02 · Intercept** | **03 · Simulate** | **04 · Replay** |
+| :--- | :--- | :--- | :--- |
+| Listen to global keyboard, mouse, scroll, and supported gestures. | Grab input and selectively prevent events from reaching other apps. | Inject keyboard and mouse events, including relative pointer motion. | Record macros and analyze input statistics with optional features. |
+
+### Platform support
+
+| Platform | Backend | Status / notes |
+| :--- | :--- | :--- |
+| **macOS** | Core Graphics event taps | Native hooks and simulation; Accessibility permission required |
+| **Windows** | Low-level input hooks | Native hooks and simulation; some injections may require elevation |
+| **Linux · X11** | XRecord, XGrab, XI2, XTest | Default Linux backend; system X11 libraries required |
+| **Linux · Wayland** | evdev / uinput | Supported via opt-in `evdev` feature; requires device permissions |
+| **HarmonyOS PC / 2-in-1** | Input Kit | Experimental, compile-checked only; not yet device-tested |
+
+**Support varies by feature and backend.** See [Platform Notes](#platform-notes) for limitations, permissions, and setup details.
+
+**Get started:** `cargo add monio` · [Read the quick start](#quick-start) · [Explore the examples](#examples)
 
 ## Features
 
@@ -28,13 +74,11 @@ A pure Rust cross-platform input hook library with **proper drag detection**.
 
 Most input hooking libraries report all mouse movement as `MouseMoved`, even when buttons are held down. This makes implementing drag-and-drop, drawing applications, or gesture recognition difficult.
 
-**monio-rs** tracks button state globally and emits `MouseDragged` events when movement occurs while any mouse button is pressed:
+**Monio** tracks button state globally and emits `MouseDragged` events when movement occurs while any mouse button is pressed:
 
-```
-Button Down → Move → Move → Button Up
-     ↓         ↓      ↓        ↓
- Pressed   Dragged  Dragged  Released
-```
+![Monio drag lifecycle: press, drag, drag, release](assets/monio-drag-detection.svg)
+
+Unlike a plain mouse-move hook, you can distinguish a deliberate drag from an ordinary pointer movement.
 
 ## Installation
 
@@ -100,10 +144,15 @@ neutral key vocabulary, the same provenance scheme), not code, so a Swift head
 and a Rust head on the same Mac agree key for key. See
 [`swift/README.md`](swift/README.md).
 
-## Using monio in practice
+## Ecosystem
 
-- [kunkunsh/tauri-plugin-user-input](https://github.com/kunkunsh/tauri-plugin-user-input.git): A Tauri plugin for exposing global keyboard and mouse input hooks to desktop apps.
-- [HuakunShen/monio-napi](https://github.com/HuakunShen/monio-napi.git): Node.js N-API bindings that wrap monio for JavaScript/TypeScript usage. Mainly for Electron apps.
+| Project | What it provides |
+| :--- | :--- |
+| **[monio-napi](https://github.com/HuakunShen/monio-napi)** | Node.js N-API bindings for using Monio from JavaScript/TypeScript, including Electron apps |
+| **[MonioInput for Swift](swift/README.md)** | A native Apple input layer sharing Monio's key vocabulary and provenance contract (a sibling implementation, not Rust bindings) |
+| **[tauri-plugin-user-input](https://github.com/kunkunsh/tauri-plugin-user-input)** | Global keyboard and mouse hooks exposed to Tauri desktop apps |
+
+The Rust library is published as **[monio on crates.io](https://crates.io/crates/monio)**. For interactive visual explanations and demos, visit the **[Monio website](https://huakunshen.github.io/monio/)**.
 
 ## Quick Start
 
