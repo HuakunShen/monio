@@ -3,6 +3,17 @@ name = "monio"
 version = "0.2.0"
 edition = "2024"
 license = "Apache-2.0"
+include = [
+    "/src/**",
+    "/examples/**",
+    "/assets/**",
+    "/README.md",
+    "/LICENSE",
+    "/CHANGELOG.md",
+    "/swift/README.md",
+    "/docs/harmonyos-pc-input-backend.md",
+    "/docs/input-provenance-cross-platform-handoff.md",
+]
 description = "Pure Rust cross-platform input monitoring library with proper drag detection"
 repository = "https://github.com/HuakunShen/monio"
 keywords = ["input", "hook", "keyboard", "mouse", "cross-platform"]
