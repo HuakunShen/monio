@@ -242,19 +242,25 @@ pub(crate) fn plan_scroll_steps(
 }
 
 fn checked_coordinates(x: f64, y: f64) -> Result<(i32, i32)> {
-    if !x.is_finite()
-        || !y.is_finite()
-        || x < i32::MIN as f64
-        || x > i32::MAX as f64
-        || y < i32::MIN as f64
-        || y > i32::MAX as f64
+    if !x.is_finite() || !y.is_finite() {
+        return Err(Error::SimulateFailed(format!(
+            "HarmonyOS global coordinates must be finite: ({x}, {y})"
+        )));
+    }
+
+    let rx = x.round();
+    let ry = y.round();
+    if rx < i32::MIN as f64 || rx > i32::MAX as f64 || ry < i32::MIN as f64 || ry > i32::MAX as f64
     {
         return Err(Error::SimulateFailed(format!(
             "HarmonyOS global coordinates are outside the i32 range: ({x}, {y})"
         )));
     }
 
-    Ok((x as i32, y as i32))
+    Ok((
+        rx.clamp(i32::MIN as f64, i32::MAX as f64) as i32,
+        ry.clamp(i32::MIN as f64, i32::MAX as f64) as i32,
+    ))
 }
 
 #[allow(dead_code)]
@@ -381,7 +387,7 @@ mod tests {
             SimulationSpec::Mouse {
                 action: 2,
                 button: 0,
-                x: 10,
+                x: 11,
                 y: -20,
             }
         );
@@ -534,5 +540,23 @@ mod tests {
             resolve_global_pointer_position(99, 12.0, 34.0, &displays),
             (12.0, 34.0)
         );
+    }
+
+    #[test]
+    fn checked_coordinates_rounds_instead_of_truncating_and_guards_bounds() {
+        assert_eq!(checked_coordinates(1292.65, 430.40).unwrap(), (1293, 430));
+        assert_eq!(checked_coordinates(-0.6, -0.4).unwrap(), (-1, 0));
+        assert_eq!(
+            checked_coordinates(i32::MAX as f64, i32::MIN as f64).unwrap(),
+            (i32::MAX, i32::MIN)
+        );
+        assert_eq!(
+            checked_coordinates(i32::MAX as f64 + 0.4, i32::MIN as f64 - 0.4).unwrap(),
+            (i32::MAX, i32::MIN)
+        );
+        assert!(checked_coordinates(i32::MAX as f64 + 0.6, 0.0).is_err());
+        assert!(checked_coordinates(0.0, i32::MIN as f64 - 0.6).is_err());
+        assert!(checked_coordinates(f64::NAN, 0.0).is_err());
+        assert!(checked_coordinates(0.0, f64::INFINITY).is_err());
     }
 }
