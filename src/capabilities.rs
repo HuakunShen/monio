@@ -26,6 +26,39 @@ impl CaptureScope {
     }
 }
 
+/// Authorization model required before synthetic input injection takes effect.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum InjectionAuthorization {
+    /// Injection works without an explicit OS permission or user consent prompt
+    /// (subject to standard OS privilege boundaries such as Windows UIPI).
+    Direct,
+    /// Requires an OS-level permission or device access grant (for example
+    /// macOS Accessibility or Linux `/dev/uinput` permissions).
+    OsPermission,
+    /// Requires runtime user consent (such as HarmonyOS `OH_Input_RequestInjection`
+    /// on API 20-25) or a privileged OS permission (`CONTROL_DEVICE` on API 26+).
+    UserConsentOrPermission,
+}
+
+impl InjectionAuthorization {
+    /// Returns a concise human-readable label for diagnostics and UIs.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Direct => "Direct",
+            Self::OsPermission => "OsPermission",
+            Self::UserConsentOrPermission => "UserConsentOrPermission",
+        }
+    }
+
+    /// Returns `true` when synthetic injection requires an interactive runtime
+    /// user-consent flow unless a privileged OS permission is held.
+    #[must_use]
+    pub const fn requires_runtime_consent(self) -> bool {
+        matches!(self, Self::UserConsentOrPermission)
+    }
+}
+
 /// Compile-time capability profile for the active platform backend.
 ///
 /// A `true` or non-`Unsupported` field indicates that the backend implements
@@ -63,6 +96,8 @@ pub struct InputCapabilities {
     pub background_pointer_query: bool,
     /// Whether listened events reliably distinguish `InputOrigin::ThisMonioSession`.
     pub injected_event_identification: bool,
+    /// Authorization model required for synthetic input injection.
+    pub injection_authorization: InjectionAuthorization,
 }
 
 /// Returns the capability profile for the compiled target backend.
@@ -85,6 +120,7 @@ pub const fn capabilities() -> InputCapabilities {
             system_settings_query: false,
             background_pointer_query: false,
             injected_event_identification: false,
+            injection_authorization: InjectionAuthorization::UserConsentOrPermission,
         }
     } else if cfg!(target_os = "macos") {
         InputCapabilities {
@@ -103,6 +139,7 @@ pub const fn capabilities() -> InputCapabilities {
             system_settings_query: true,
             background_pointer_query: true,
             injected_event_identification: true,
+            injection_authorization: InjectionAuthorization::OsPermission,
         }
     } else if cfg!(target_os = "windows") {
         InputCapabilities {
@@ -121,6 +158,7 @@ pub const fn capabilities() -> InputCapabilities {
             system_settings_query: true,
             background_pointer_query: true,
             injected_event_identification: true,
+            injection_authorization: InjectionAuthorization::Direct,
         }
     } else if cfg!(all(target_os = "linux", feature = "evdev")) {
         InputCapabilities {
@@ -139,6 +177,7 @@ pub const fn capabilities() -> InputCapabilities {
             system_settings_query: true,
             background_pointer_query: true,
             injected_event_identification: false,
+            injection_authorization: InjectionAuthorization::OsPermission,
         }
     } else {
         // Linux X11 (default)
@@ -158,6 +197,7 @@ pub const fn capabilities() -> InputCapabilities {
             system_settings_query: true,
             background_pointer_query: true,
             injected_event_identification: false,
+            injection_authorization: InjectionAuthorization::Direct,
         }
     }
 }
@@ -180,11 +220,20 @@ mod tests {
             assert_eq!(caps.pointer_grab, CaptureScope::ObserveOnly);
             assert_eq!(caps.relative_pointer_capture, CaptureScope::Unsupported);
             assert!(!caps.system_settings_query);
+            assert_eq!(
+                caps.injection_authorization,
+                InjectionAuthorization::UserConsentOrPermission
+            );
+            assert!(caps.injection_authorization.requires_runtime_consent());
         } else if cfg!(target_os = "macos") {
             assert_eq!(caps.pointer_grab, CaptureScope::Global);
             assert_eq!(caps.relative_pointer_capture, CaptureScope::Global);
             assert!(caps.unicode_text_injection);
             assert!(caps.gesture_injection);
+            assert_eq!(
+                caps.injection_authorization,
+                InjectionAuthorization::OsPermission
+            );
         }
     }
 }

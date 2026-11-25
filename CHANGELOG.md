@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0
+
+- Complete the HarmonyOS PC/2-in-1 backend (`target_env = "ohos"`): add display enumeration (`displays`, `primary_display`, `display_at_point`), global `display_id` offset resolution in `mouse_position`, phased `scroll`, `media_key`, `MouseWheel` / `MouseDragged` / relative motion simulation, and explicit `Error::NotSupported` boundaries.
+- Add `monio::capabilities()`, `InputCapabilities`, `CaptureScope`, and `InjectionAuthorization` for compile-time backend capability and injection-authorization introspection.
+- Add a cross-platform GPUI example app under `examples/gpui-app/` (isolated Cargo workspace, `gpui-component` 0.9.0, Desktop + HarmonyOS).
+- Scope `futures-util` to Linux `target_os` dependencies to eliminate unused-dependency warnings on non-Linux targets.
+
 ## 0.2.0
 
 - Fix macOS synthetic dragging: pointer moves now emit the appropriate drag event while a simulated mouse button is held. Track click counts for repeated clicks.

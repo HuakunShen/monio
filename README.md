@@ -670,30 +670,37 @@ No special permissions required for hooking. Simulation may require the app to b
 
 ### HarmonyOS PC/2in1
 
-The backend targets HarmonyOS PC/2in1 API 26.0.0 or newer and uses Input Kit:
+The backend targets HarmonyOS PC/2in1 (`libohinput.so` + `libnative_display_manager.so`) and uses:
 
 - `ohos.permission.INPUT_MONITORING` for keyboard, mouse, and axis monitoring;
 - `ohos.permission.HOOK_KEY_EVENT` for keyboard suppression/pass-through;
-- `ohos.permission.CONTROL_DEVICE` for direct key and global mouse injection.
+- **Injection authorization**: on API 20–25, `OH_Input_RequestInjection` / `OH_Input_QueryAuthorizedStatus` / `OH_Input_CancelInjection` is the active **user-consent runtime authorization** flow (`"Allow to use your screen?"`); starting in API 26.0.0, callers holding `ohos.permission.CONTROL_DEVICE` can inject directly without prompting. It does not request `ohos.permission.INTERCEPT_INPUT_EVENT`.
 
-It does not use the legacy `OH_Input_RequestInjection` authorization flow and
-does not request `ohos.permission.INTERCEPT_INPUT_EVENT`.
+**Runtime `OH_Input_RequestInjection` behavior (verified on `MateBook Pro` 2-in-1 emulator, API 24)**:
+
+- Calling `OH_Input_RequestInjection(callback)` standalone (without a prior `Inject*` call) returns `Ok(())` and immediately presents the system `"Allow to use your screen?"` consent dialog.
+- Clicking `Deny` delivers `0` (`UNAUTHORIZED`) to the callback, `OH_Input_QueryAuthorizedStatus` returns `Ok(())` with `status = 0` (`UNAUTHORIZED`), and calling `OH_Input_RequestInjection` again re-prompts cleanly.
+- Authorization is **ephemeral per process** (it does not persist across `aa force-stop` / app restarts). Calling `OH_Input_CancelInjection()` immediately resets `OH_Input_QueryAuthorizedStatus` to `UNAUTHORIZED (0)`, and a subsequent `OH_Input_RequestInjection` in the same process prompts again.
+- If another running app still holds injection authorization, `OH_Input_RequestInjection` returns `3900008` (`INPUT_INJECTION_AUTHORIZED_OTHERS`) without preempting it.
+
+**Global coordinate units**:
+
+`monio`'s `displays().bounds`, `mouse_position()`, and `mouse_move()` on HarmonyOS all use **global physical pixels (`px`)** with origin `(0, 0)` at the primary display's top-left corner (`mouse_position()` maps `OH_Input_GetPointerLocation`'s `display_id` + display-local `px` onto the matching display's `bounds`). Callers must **not** multiply by `scale_factor` or pass UI logical pixels directly.
 
 `grab()` can consume keyboard events. Returning `Some(_)` dispatches the
 original native keyboard event; it cannot rewrite it. Mouse and wheel events
 are delivered to the handler for observation, but `None` cannot consume them.
 Pointer position, display enumeration, primary-display lookup, display-at-point,
 phased scrolling, mouse wheel simulation, relative mouse movement, and media
-keys are supported (`libohinput.so` + `libnative_display_manager.so`); system
-input settings, `RelativePointerCapture`, pinch/rotate gestures, and
-`type_text()` return `Error::NotSupported`.
+keys are supported; system input settings, `RelativePointerCapture`, pinch/rotate
+gestures, and `type_text()` return `Error::NotSupported`.
 
 The backend has been cross-compiled, linked with the HarmonyOS NDK, and
-packaged into a Stage-model NAPI test HAP on the `MateBook Pro` 2-in-1 emulator
-(HarmonyOS 6.1.1 / API 24), verifying display queries, injection, scroll, media
-keys, unsupported boundaries, and `PermissionDenied` classification. Live
-`INPUT_MONITORING` / `HOOK_KEY_EVENT` capture and API 26 `CONTROL_DEVICE`
-direct injection still require a signed app profile on a target device. See
+verified on the `MateBook Pro` 2-in-1 emulator (HarmonyOS 6.1.1 / API 24) for
+display queries, user-consent key injection, scroll, media keys, unsupported
+boundaries, and `PermissionDenied` classification. Live `INPUT_MONITORING` /
+`HOOK_KEY_EVENT` capture and API 26 `CONTROL_DEVICE` direct injection still
+require a signed app profile on a target device. See
 [`docs/harmonyos-pc-input-backend.md`](docs/harmonyos-pc-input-backend.md) for
 the SDK split, evidence, exact limitations, and native acceptance matrix.
 

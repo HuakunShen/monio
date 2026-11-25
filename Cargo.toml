@@ -1,6 +1,6 @@
 [package]
 name = "monio"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 license = "Apache-2.0"
 include = [
@@ -25,7 +25,6 @@ log = "0.4"
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
 tokio = { version = "1", features = ["sync", "rt", "macros", "net", "time"], optional = true }
-futures-util = { version = "0.3", optional = true }
 
 [dev-dependencies]
 ratatui = "0.30"
@@ -53,6 +52,7 @@ windows = { version = "0.59", features = [
 ] }
 
 [target.'cfg(all(target_os = "linux", not(target_env = "ohos")))'.dependencies]
+futures-util = { version = "0.3", optional = true }
 x11 = { version = "2.21", features = ["xlib", "xrecord", "xinput", "xtst"], optional = true }
 evdev = { version = "0.12", optional = true }
 libc = { version = "0.2", optional = true }

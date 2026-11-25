@@ -88,7 +88,7 @@ pub mod scroll;
 pub mod text;
 
 // Re-exports
-pub use capabilities::{CaptureScope, InputCapabilities, capabilities};
+pub use capabilities::{CaptureScope, InjectionAuthorization, InputCapabilities, capabilities};
 pub use display::{
     DisplayInfo, Rect, SystemSettings, display_at_point, displays, primary_display, system_settings,
 };
