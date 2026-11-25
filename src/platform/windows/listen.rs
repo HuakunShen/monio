@@ -19,17 +19,22 @@ struct SendableHHOOK(HHOOK);
 // It's safe to send between threads because Windows handles are thread-safe.
 unsafe impl Send for SendableHHOOK {}
 unsafe impl Sync for SendableHHOOK {}
-use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::System::RemoteDesktop::{
+    NOTIFY_FOR_THIS_SESSION, WTSRegisterSessionNotification, WTSUnRegisterSessionNotification,
+};
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, DispatchMessageW, GetMessageW, GetSystemMetrics, HC_ACTION, HHOOK,
-    KBDLLHOOKSTRUCT, LLMHF_INJECTED, MSG, MSLLHOOKSTRUCT, PostThreadMessageW, SM_CXSCREEN,
-    SM_CXVIRTUALSCREEN, SM_CYSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
-    SetWindowsHookExW, UnhookWindowsHookEx, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_INPUT, WM_KEYDOWN,
-    WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEHWHEEL,
-    WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_QUIT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
-    WM_XBUTTONDOWN, WM_XBUTTONUP,
+    CallNextHookEx, CreateWindowExW, DestroyWindow, DispatchMessageW, GetMessageW,
+    GetSystemMetrics, HC_ACTION, HHOOK, KBDLLHOOKSTRUCT, LLMHF_INJECTED, MSG, MSLLHOOKSTRUCT,
+    PostThreadMessageW, SM_CXSCREEN, SM_CXVIRTUALSCREEN, SM_CYSCREEN, SM_CYVIRTUALSCREEN,
+    SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SetWindowsHookExW, UnhookWindowsHookEx, WH_KEYBOARD_LL,
+    WH_MOUSE_LL, WINDOW_EX_STYLE, WINDOW_STYLE, WM_INPUT, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN,
+    WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEHWHEEL, WM_MOUSEMOVE, WM_MOUSEWHEEL,
+    WM_QUIT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_WTSSESSION_CHANGE,
+    WM_XBUTTONDOWN, WM_XBUTTONUP, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_OVERLAPPED,
 };
+use windows::core::w;
 
 use super::{
     keycodes::keycode_to_key,
@@ -246,6 +251,52 @@ impl Drop for InstalledHooks {
     }
 }
 
+struct SessionNotificationGuard {
+    hwnd: HWND,
+}
+
+impl SessionNotificationGuard {
+    fn register() -> Option<Self> {
+        let hwnd = match unsafe {
+            CreateWindowExW(
+                WINDOW_EX_STYLE(WS_EX_TOOLWINDOW.0 | WS_EX_NOACTIVATE.0),
+                w!("STATIC"),
+                w!("monio session monitor"),
+                WINDOW_STYLE(WS_OVERLAPPED.0),
+                0,
+                0,
+                0,
+                0,
+                None,
+                None,
+                None,
+                None,
+            )
+        } {
+            Ok(hwnd) => hwnd,
+            Err(_) => {
+                provenance::clear_console_session();
+                return None;
+            }
+        };
+        if unsafe { WTSRegisterSessionNotification(hwnd, NOTIFY_FOR_THIS_SESSION) }.is_err() {
+            let _ = unsafe { DestroyWindow(hwnd) };
+            provenance::clear_console_session();
+            return None;
+        }
+        provenance::refresh_console_session();
+        Some(Self { hwnd })
+    }
+}
+
+impl Drop for SessionNotificationGuard {
+    fn drop(&mut self) {
+        let _ = unsafe { WTSUnRegisterSessionNotification(self.hwnd) };
+        let _ = unsafe { DestroyWindow(self.hwnd) };
+        provenance::clear_console_session();
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum MouseMoveRoute {
     Legacy,
@@ -383,6 +434,9 @@ fn run_listen_message_loop() -> Result<()> {
         if stop_requested() {
             return Ok(());
         }
+        if message.message == WM_WTSSESSION_CHANGE {
+            provenance::refresh_console_session();
+        }
         unsafe {
             DispatchMessageW(&message);
         }
@@ -405,6 +459,9 @@ fn run_grab_message_loop(raw_mouse: &RawMouseInput) -> Result<()> {
         }
         if stop_requested() {
             return Ok(());
+        }
+        if message.message == WM_WTSSESSION_CHANGE {
+            provenance::refresh_console_session();
         }
 
         if message.message == WM_INPUT && message.hwnd == raw_mouse.window() {
@@ -718,6 +775,7 @@ pub fn run_hook<H: EventHandler + 'static>(running: &Arc<AtomicBool>, handler: H
     let _session = ActiveSession::claim()?;
     provenance::initialize()?;
     let _callbacks = CallbackState::listen(running, handler)?;
+    let _session_notifications = SessionNotificationGuard::register();
     let mut hooks = InstalledHooks::install()?;
 
     // Send hook enabled event
@@ -757,6 +815,7 @@ pub fn run_grab_hook<H: GrabHandler + 'static>(
     let _session = ActiveSession::claim()?;
     provenance::initialize()?;
     let _callbacks = CallbackState::grab(running, handler)?;
+    let _session_notifications = SessionNotificationGuard::register();
     let mut raw_mouse = RawMouseInput::acquire()?;
     let mut hooks = InstalledHooks::install()?;
     let mut enabled = false;

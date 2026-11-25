@@ -163,6 +163,9 @@ pub enum InputOrigin {
     /// The backend cannot determine where this event originated.
     #[default]
     Unknown,
+    /// The active backend has positive OS evidence that this event came from
+    /// a physical input device rather than software injection.
+    Physical,
     /// The active backend has evidence that this event was synthesized.
     Injected {
         /// Best available identity for the injector.
@@ -389,6 +392,11 @@ impl Event {
             }
         )
     }
+
+    /// Whether the active backend positively identified this event as physical.
+    pub fn is_physical(&self) -> bool {
+        matches!(self.origin, InputOrigin::Physical)
+    }
 }
 
 #[cfg(test)]
@@ -410,6 +418,28 @@ mod tests {
         };
 
         assert!(event.is_from_this_monio_session());
+        assert!(!event.is_physical());
+    }
+
+    #[test]
+    fn physical_origin_reports_is_physical() {
+        let mut event = Event::key_pressed(Key::KeyA, 0);
+        assert!(!event.is_physical());
+
+        event.origin = InputOrigin::Physical;
+        assert!(event.is_physical());
+        assert!(!event.is_from_this_monio_session());
+    }
+
+    #[cfg(feature = "recorder")]
+    #[test]
+    fn physical_origin_round_trips_through_serde() {
+        let mut event = Event::key_pressed(Key::KeyA, 0);
+        event.origin = InputOrigin::Physical;
+        let encoded = serde_json::to_value(&event).expect("physical event should serialize");
+        let decoded: Event =
+            serde_json::from_value(encoded).expect("physical event should deserialize");
+        assert_eq!(decoded.origin, InputOrigin::Physical);
     }
 
     #[test]

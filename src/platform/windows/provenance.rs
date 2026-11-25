@@ -1,8 +1,24 @@
-use crate::{Error, InjectorIdentity, InputOrigin, Result};
-use std::sync::OnceLock;
-use windows::Win32::UI::WindowsAndMessaging::{
-    KBDLLHOOKSTRUCT, LLKHF_INJECTED, LLMHF_INJECTED, MSLLHOOKSTRUCT,
+use crate::platform::provenance_classify::{
+    LLKHF_INJECTED_BIT, LLKHF_LOWER_IL_INJECTED_BIT, LLMHF_INJECTED_BIT,
+    LLMHF_LOWER_IL_INJECTED_BIT, classify_windows_keyboard, classify_windows_mouse,
+    is_console_session,
 };
+use crate::{Error, InputOrigin, Result};
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
+use windows::Win32::System::RemoteDesktop::{ProcessIdToSessionId, WTSGetActiveConsoleSessionId};
+use windows::Win32::System::Threading::GetCurrentProcessId;
+use windows::Win32::UI::WindowsAndMessaging::{
+    KBDLLHOOKSTRUCT, LLKHF_INJECTED, LLKHF_LOWER_IL_INJECTED, LLMHF_INJECTED,
+    LLMHF_LOWER_IL_INJECTED, MSLLHOOKSTRUCT,
+};
+
+const _: () = assert!(LLKHF_INJECTED.0 == LLKHF_INJECTED_BIT);
+const _: () = assert!(LLKHF_LOWER_IL_INJECTED.0 == LLKHF_LOWER_IL_INJECTED_BIT);
+const _: () = assert!(LLMHF_INJECTED == LLMHF_INJECTED_BIT);
+const _: () = assert!(LLMHF_LOWER_IL_INJECTED == LLMHF_LOWER_IL_INJECTED_BIT);
+
+static ON_CONSOLE_SESSION: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Copy)]
 struct SessionTags {
@@ -60,18 +76,34 @@ fn recognized_tags() -> Result<[usize; 2]> {
     Ok([tags.injection, tags.grab_replay])
 }
 
+pub(super) fn refresh_console_session() -> bool {
+    let mut process_session = 0u32;
+    let process_ok = unsafe { ProcessIdToSessionId(GetCurrentProcessId(), &mut process_session) };
+    let active_console = unsafe { WTSGetActiveConsoleSessionId() };
+    let on_console = is_console_session(process_ok.is_ok().then_some(process_session), active_console);
+    ON_CONSOLE_SESSION.store(on_console, Ordering::Release);
+    on_console
+}
+
+pub(super) fn clear_console_session() {
+    ON_CONSOLE_SESSION.store(false, Ordering::Release);
+}
+
 pub(super) fn initialize() -> Result<()> {
-    tags().map(|_| ())
+    tags()?;
+    refresh_console_session();
+    Ok(())
 }
 
 pub(super) fn keyboard_event_origin(event: &KBDLLHOOKSTRUCT) -> InputOrigin {
     let Some(Ok(tags)) = SESSION_TAGS.get() else {
         return InputOrigin::Unknown;
     };
-    classify_source(
-        event.flags.0 & LLKHF_INJECTED.0 != 0,
+    classify_windows_keyboard(
+        event.flags.0,
         event.dwExtraInfo,
         &[tags.injection, tags.grab_replay],
+        ON_CONSOLE_SESSION.load(Ordering::Acquire),
     )
 }
 
@@ -79,21 +111,12 @@ pub(super) fn mouse_event_origin(event: &MSLLHOOKSTRUCT) -> InputOrigin {
     let Some(Ok(tags)) = SESSION_TAGS.get() else {
         return InputOrigin::Unknown;
     };
-    classify_source(
-        event.flags & LLMHF_INJECTED != 0,
+    classify_windows_mouse(
+        event.flags,
         event.dwExtraInfo,
         &[tags.injection, tags.grab_replay],
+        ON_CONSOLE_SESSION.load(Ordering::Acquire),
     )
-}
-
-fn classify_source(is_injected: bool, observed_tag: usize, expected_tags: &[usize]) -> InputOrigin {
-    if is_injected && observed_tag != 0 && expected_tags.contains(&observed_tag) {
-        InputOrigin::Injected {
-            injector: InjectorIdentity::ThisMonioSession,
-        }
-    } else {
-        InputOrigin::Unknown
-    }
 }
 
 pub(super) fn is_grab_replay(event: &MSLLHOOKSTRUCT) -> bool {
@@ -123,18 +146,47 @@ mod tests {
         let expected = InputOrigin::Injected {
             injector: InjectorIdentity::ThisMonioSession,
         };
+        let recognized = recognized_tags().unwrap();
 
         assert_eq!(
-            classify_source(true, session_tag().unwrap(), &recognized_tags().unwrap()),
+            classify_windows_keyboard(
+                LLKHF_INJECTED.0,
+                session_tag().unwrap(),
+                &recognized,
+                true
+            ),
             expected
         );
         assert_eq!(
-            classify_source(
-                true,
+            classify_windows_mouse(
+                LLMHF_INJECTED,
                 grab_replay_tag().unwrap(),
-                &recognized_tags().unwrap()
+                &recognized,
+                true
             ),
             expected
+        );
+    }
+
+    #[test]
+    fn uninjected_console_input_is_physical_and_lower_il_or_non_console_is_unknown() {
+        let recognized = recognized_tags().unwrap();
+
+        assert_eq!(
+            classify_windows_keyboard(0, 0, &recognized, true),
+            InputOrigin::Physical
+        );
+        assert_eq!(
+            classify_windows_keyboard(0, 0, &recognized, false),
+            InputOrigin::Unknown
+        );
+        assert_eq!(
+            classify_windows_keyboard(LLKHF_LOWER_IL_INJECTED.0, 0, &recognized, true),
+            InputOrigin::Unknown
+        );
+        assert_eq!(
+            classify_windows_keyboard(LLKHF_INJECTED.0, 0, &recognized, true),
+            InputOrigin::Unknown
         );
     }
 

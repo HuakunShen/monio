@@ -1,5 +1,8 @@
 //! Platform-specific implementations.
 
+#[cfg(any(target_os = "windows", test))]
+mod provenance_classify;
+
 #[cfg(any(
     target_os = "macos",
     target_os = "windows",

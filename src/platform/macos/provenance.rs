@@ -69,6 +69,8 @@ fn classify_source(
         InputOrigin::Injected {
             injector: InjectorIdentity::ThisMonioSession,
         }
+    } else if observed_pid == 0 && observed_tag == 0 {
+        InputOrigin::Physical
     } else {
         InputOrigin::Unknown
     }
@@ -106,6 +108,33 @@ mod tests {
     fn matching_tag_from_another_process_remains_unknown() {
         assert_eq!(
             classify_source(0x1234, 0x1234, 4000, 4001),
+            InputOrigin::Unknown
+        );
+    }
+
+    #[test]
+    fn zero_pid_and_zero_tag_is_classified_as_physical() {
+        assert_eq!(classify_source(0, 0x1234, 0, 4000), InputOrigin::Physical);
+    }
+
+    #[test]
+    fn foreign_process_with_zero_tag_remains_unknown() {
+        assert_eq!(classify_source(0, 0x1234, 5000, 4000), InputOrigin::Unknown);
+    }
+
+    #[test]
+    fn negative_pid_with_zero_tag_remains_unknown() {
+        assert_eq!(classify_source(0, 0x1234, -1, 4000), InputOrigin::Unknown);
+    }
+
+    #[test]
+    fn zero_pid_with_nonzero_tag_remains_unknown() {
+        assert_eq!(
+            classify_source(0x1234, 0x1234, 0, 4000),
+            InputOrigin::Unknown
+        );
+        assert_eq!(
+            classify_source(0x9999, 0x1234, 0, 4000),
             InputOrigin::Unknown
         );
     }
