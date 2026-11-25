@@ -1,0 +1,70 @@
+[workspace]
+resolver = "3"
+
+[workspace.dependencies]
+# Keep GPUI and its OHOS platform crate aligned on the same gpui-pre release.
+# Desktop builds enable default GPUI features; OHOS disables defaults per ohos-rs/gpui-template.
+gpui = { package = "gpui-pre", version = "=0.3.11", default-features = false }
+# runtime_shaders lets macOS builds compile Metal shaders at runtime without Xcode's MetalToolchain download.
+gpui-platform = { package = "gpui-pre-platform", version = "=0.3.11", features = ["font-kit", "wayland", "x11", "runtime_shaders"] }
+gpui-component = "=0.9.0"
+gpui-kit-assets = "=0.9.0"
+gpui-ohos = "=0.0.1-beta.0"
+openharmony-ability = "=1.0.0-beta.5"
+openharmony-ability-derive = "=1.0.0-beta.5"
+# Pinned to match ohos-rs/gpui-template Cargo.lock; newer plugin/arkui point releases break gpui-ohos 0.0.1-beta.0.
+ohos-arkui-binding = "=0.6.0"
+openharmony-ability-plugin-files = "=1.0.0-beta.5"
+openharmony-ability-plugin-notification = "=1.0.0-beta.5"
+openharmony-ability-plugin-system-state = "=1.0.0-beta.5"
+openharmony-ability-plugin-window = "=1.0.0-beta.5"
+napi-ohos = "=1.2.0"
+napi-derive-ohos = "=1.2.0"
+napi-build-ohos = "=1.2.0"
+ohos-hilog-binding = { version = "0.2.5", features = ["log"] }
+monio = { path = "../..", features = ["statistics"] }
+log = "0.4"
+
+[package]
+name = "monio-gpui"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "Cross-platform GPUI GUI example for monio (Desktop + HarmonyOS)"
+readme = "README.md"
+
+[lib]
+name = "monio_gpui"
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "monio-gpui"
+path = "src/main.rs"
+
+[dependencies]
+monio.workspace = true
+log.workspace = true
+gpui-component.workspace = true
+gpui-kit-assets.workspace = true
+
+[target.'cfg(not(target_env = "ohos"))'.dependencies]
+gpui = { workspace = true, features = ["font-kit", "wayland", "x11", "windows-manifest"] }
+gpui-platform.workspace = true
+
+[target.'cfg(target_env = "ohos")'.dependencies]
+gpui.workspace = true
+gpui-ohos.workspace = true
+openharmony-ability.workspace = true
+openharmony-ability-derive.workspace = true
+ohos-arkui-binding.workspace = true
+openharmony-ability-plugin-files.workspace = true
+openharmony-ability-plugin-notification.workspace = true
+openharmony-ability-plugin-system-state.workspace = true
+openharmony-ability-plugin-window.workspace = true
+napi-ohos.workspace = true
+napi-derive-ohos.workspace = true
+ohos-hilog-binding.workspace = true
+
+[target.'cfg(target_env = "ohos")'.build-dependencies]
+napi-build-ohos.workspace = true

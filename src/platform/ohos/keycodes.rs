@@ -1,5 +1,6 @@
 use crate::event::Button;
 use crate::keycode::Key;
+use crate::media::MediaKey;
 
 const LETTERS: [Key; 26] = [
     Key::KeyA,
@@ -253,6 +254,19 @@ pub(crate) fn button_to_native(button: Button) -> Option<i32> {
     }
 }
 
+pub(crate) fn media_key_to_keycode(key: MediaKey) -> i32 {
+    match key {
+        MediaKey::VolumeUp => 16,
+        MediaKey::VolumeDown => 17,
+        MediaKey::Mute => 22,
+        MediaKey::BrightnessUp => 40,
+        MediaKey::BrightnessDown => 41,
+        MediaKey::PlayPause => 10,
+        MediaKey::Next => 12,
+        MediaKey::Previous => 13,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -314,5 +328,23 @@ mod tests {
             button_to_native(crate::event::Button::Unknown(42)),
             Some(42)
         );
+    }
+
+    #[test]
+    fn every_media_key_maps_to_distinct_ohos_keycode() {
+        let all = [
+            MediaKey::VolumeUp,
+            MediaKey::VolumeDown,
+            MediaKey::Mute,
+            MediaKey::BrightnessUp,
+            MediaKey::BrightnessDown,
+            MediaKey::PlayPause,
+            MediaKey::Next,
+            MediaKey::Previous,
+        ];
+        let mut codes = std::collections::HashSet::new();
+        for key in all {
+            assert!(codes.insert(media_key_to_keycode(key)));
+        }
     }
 }

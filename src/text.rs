@@ -28,7 +28,7 @@
 //! | Windows | not implemented — needs `SendInput` with `KEYEVENTF_UNICODE`. Not `VkKeyScanExW`, which can only produce what the active layout can produce, so a US layout cannot type `é` let alone `好` |
 //! | X11 | not implemented — needs libfakekey's remap-a-spare-keycode trick, or a reimplementation of it |
 //! | Wayland | **unsolved.** libei has no text protocol. KDE Connect maps through `xkb_utf32_to_keysym` and gives up when there is none; GSConnect shells out to `wtype`/`ydotool`. After twelve years neither project can type Chinese into a Wayland desktop |
-//! | HarmonyOS | not surveyed |
+//! | HarmonyOS | not supported — Input Kit has no Unicode text injection API, and IME Kit only attaches to the caller's own editor |
 //!
 //! Every unimplemented platform returns [`crate::Error::NotSupported`] naming what it
 //! would need. That is the point of this module existing on those platforms at
@@ -65,17 +65,24 @@ pub fn type_text(text: &str) -> Result<()> {
 
     #[cfg(not(target_os = "macos"))]
     {
+        let target = if cfg!(target_env = "ohos") {
+            "harmonyos"
+        } else {
+            std::env::consts::OS
+        };
         Err(crate::error::Error::NotSupported(format!(
-            "typing text is implemented for macOS only; {} needs {}",
-            std::env::consts::OS,
-            NEEDED
+            "typing text is implemented for macOS only; {target} needs {NEEDED}"
         )))
     }
 }
 
 #[cfg(not(target_os = "macos"))]
-const NEEDED: &str = "SendInput with KEYEVENTF_UNICODE on Windows, libfakekey on X11, \
-                      and has no known answer on Wayland — see this module's documentation";
+const NEEDED: &str = if cfg!(target_env = "ohos") {
+    "a public global Unicode text-injection API (Input Kit has none, and IME Kit attaches only to the caller's own editor) — see this module's documentation"
+} else {
+    "SendInput with KEYEVENTF_UNICODE on Windows, libfakekey on X11, \
+     and has no known answer on Wayland — see this module's documentation"
+};
 
 #[cfg(test)]
 mod tests {

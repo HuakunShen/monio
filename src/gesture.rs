@@ -29,7 +29,7 @@
 //! | Windows | not implemented — Precision Touchpad gestures are delivered by the driver stack and `SendInput` cannot inject one; the nearest thing is `WM_GESTURE`, which is per-window |
 //! | X11 | not implemented — XTest has no gesture concept; XInput 2.4 pinch events cannot be faked through it |
 //! | Wayland | not implemented — libei has no pinch interface today |
-//! | HarmonyOS | not surveyed |
+//! | HarmonyOS | not supported — Input Kit exposes pinch/rotate axis monitoring only, with no axis-event injection API |
 
 use crate::error::Result;
 
@@ -120,9 +120,13 @@ pub fn smart_magnify() -> Result<()> {
 
 #[cfg(not(target_os = "macos"))]
 fn unsupported(what: &str) -> crate::error::Error {
+    let target = if cfg!(target_env = "ohos") {
+        "harmonyos"
+    } else {
+        std::env::consts::OS
+    };
     crate::error::Error::NotSupported(format!(
-        "{what} is implemented for macOS only; {} has no injectable pinch — \
+        "{what} is implemented for macOS only; {target} has no injectable pinch — \
          see this module's documentation",
-        std::env::consts::OS,
     ))
 }

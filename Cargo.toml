@@ -60,6 +60,7 @@ ashpd = { version = "0.13.13", default-features = false, features = ["input_capt
 reis = { version = "0.7.1", default-features = false, features = ["tokio"], optional = true }
 
 [target.'cfg(target_env = "ohos")'.dependencies]
+ohos-display-sys = { version = "0.1.4", features = ["api-20"] }
 ohos-input-sys = { version = "0.3.4", features = ["api-23"] }
 ohos-sys-opaque-types = "0.1.10"
 

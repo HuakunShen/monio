@@ -4,8 +4,7 @@
 //!
 //! ## Features
 //!
-//! - Cross-platform support (macOS, Windows, Linux, plus a compile-checked
-//!   HarmonyOS PC/2in1 backend)
+//! - Cross-platform support (macOS, Windows, Linux, and HarmonyOS PC/2in1)
 //! - Proper drag detection (distinguishes `MouseDragged` from `MouseMoved`)
 //! - Event grabbing (consume events to prevent them from reaching other apps)
 //! - Explicit relative-pointer capture leases for remote-control sessions
@@ -123,7 +122,7 @@ pub use scroll::{ScrollPhase, scroll};
 /// floor. See [`text`] for why it is a separate entry point.
 pub use text::type_text;
 
-#[cfg(all(test, not(target_os = "windows")))]
+#[cfg(all(test, not(any(target_os = "windows", target_env = "ohos"))))]
 mod relative_pointer_capture_api_tests {
     use super::{Error, RelativePointerCapture};
 

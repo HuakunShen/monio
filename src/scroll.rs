@@ -25,7 +25,7 @@
 //! | Windows | not implemented — needs `SendInput` with `MOUSEEVENTF_WHEEL`/`HWHEEL`, which has no phase concept; Precision Touchpad gestures arrive through a different stack entirely |
 //! | X11 | not implemented — needs `XTestFakeButtonEvent` on buttons 4–7, which is notches only |
 //! | Wayland | not implemented — needs libei's `ei_scroll` plus `ei_scroll_discrete`; libei does have the axis-stop concept a phase needs |
-//! | HarmonyOS | not surveyed |
+//! | HarmonyOS | implemented — `OH_Input_InjectMouseEventGlobal` with `MOUSE_ACTION_AXIS_BEGIN`/`UPDATE`/`END` (`InputEvent_MouseAxis`, no distinct momentum field) |
 
 use crate::error::Result;
 
@@ -72,23 +72,23 @@ pub enum ScrollPhase {
 /// # }
 /// ```
 pub fn scroll(delta_x: f64, delta_y: f64, phase: ScrollPhase) -> Result<()> {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_env = "ohos"))]
     {
         crate::platform::scroll(delta_x, delta_y, phase)
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_env = "ohos")))]
     {
         let _ = (delta_x, delta_y, phase);
         Err(crate::error::Error::NotSupported(format!(
-            "phased scrolling is implemented for macOS only; {} needs {}",
+            "phased scrolling is implemented for macOS and HarmonyOS only; {} needs {}",
             std::env::consts::OS,
             NEEDED
         )))
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_env = "ohos")))]
 const NEEDED: &str = "SendInput with MOUSEEVENTF_WHEEL on Windows (no phases), \
                       XTestFakeButtonEvent on X11 (notches only), or ei_scroll on Wayland \
                       — see this module's documentation";

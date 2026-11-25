@@ -1,24 +1,27 @@
 //! HarmonyOS input simulation through Input Kit.
 
-use super::display::mouse_position;
+use super::constants::MOUSE_ACTION_AXIS_END;
+use super::display::{effective_pointer_position, remember_pointer_position};
 use super::result::simulate_error;
 use super::translate::{SimulationSpec, simulation_spec};
 use crate::error::{Error, Result};
-use crate::event::{Button, Event};
+use crate::event::{Button, Event, EventType};
 use crate::keycode::Key;
+use crate::platform::motion::{Motion, motion_from_event};
 use ohos_input_sys::input_manager::{
     OH_Input_CreateKeyEvent, OH_Input_CreateMouseEvent, OH_Input_DestroyKeyEvent,
     OH_Input_DestroyMouseEvent, OH_Input_InjectKeyEvent, OH_Input_InjectMouseEventGlobal,
     OH_Input_SetKeyEventAction, OH_Input_SetKeyEventKeyCode, OH_Input_SetMouseEventAction,
-    OH_Input_SetMouseEventButton, OH_Input_SetMouseEventGlobalX, OH_Input_SetMouseEventGlobalY,
+    OH_Input_SetMouseEventAxisType, OH_Input_SetMouseEventAxisValue, OH_Input_SetMouseEventButton,
+    OH_Input_SetMouseEventGlobalX, OH_Input_SetMouseEventGlobalY,
 };
 use std::ffi::c_void;
 use std::ptr;
 
-struct NativeKeyEvent(*mut c_void);
+pub(super) struct NativeKeyEvent(*mut c_void);
 
 impl NativeKeyEvent {
-    fn new() -> Result<Self> {
+    pub(super) fn new() -> Result<Self> {
         // SAFETY: The returned pointer is checked for null and exclusively
         // owned by this RAII wrapper until Drop destroys it.
         let event = unsafe { OH_Input_CreateKeyEvent() };
@@ -31,7 +34,7 @@ impl NativeKeyEvent {
         }
     }
 
-    fn inject(&self, action: i32, keycode: i32) -> Result<()> {
+    pub(super) fn inject(&self, action: i32, keycode: i32) -> Result<()> {
         // SAFETY: self owns a live Input_KeyEvent for the duration of these
         // synchronous setter and injection calls.
         let code = unsafe {
@@ -60,10 +63,10 @@ impl Drop for NativeKeyEvent {
     }
 }
 
-struct NativeMouseEvent(*mut c_void);
+pub(super) struct NativeMouseEvent(*mut c_void);
 
 impl NativeMouseEvent {
-    fn new() -> Result<Self> {
+    pub(super) fn new() -> Result<Self> {
         // SAFETY: The returned pointer is checked for null and exclusively
         // owned by this RAII wrapper until Drop destroys it.
         let event = unsafe { OH_Input_CreateMouseEvent() };
@@ -83,6 +86,28 @@ impl NativeMouseEvent {
             let event = self.0.cast();
             OH_Input_SetMouseEventAction(event, action);
             OH_Input_SetMouseEventButton(event, button);
+            OH_Input_SetMouseEventGlobalX(event, x);
+            OH_Input_SetMouseEventGlobalY(event, y);
+            OH_Input_InjectMouseEventGlobal(event)
+        };
+        injection_result("OH_Input_InjectMouseEventGlobal", code)
+    }
+
+    pub(super) fn inject_axis(
+        &self,
+        action: i32,
+        axis_type: i32,
+        axis_value: f32,
+        x: i32,
+        y: i32,
+    ) -> Result<()> {
+        // SAFETY: self owns a live Input_MouseEvent for the duration of these
+        // synchronous setter and injection calls.
+        let code = unsafe {
+            let event = self.0.cast();
+            OH_Input_SetMouseEventAction(event, action);
+            OH_Input_SetMouseEventAxisType(event, axis_type);
+            OH_Input_SetMouseEventAxisValue(event, axis_value);
             OH_Input_SetMouseEventGlobalX(event, x);
             OH_Input_SetMouseEventGlobalY(event, y);
             OH_Input_InjectMouseEventGlobal(event)
@@ -116,6 +141,14 @@ fn injection_result(operation: &str, code: i32) -> Result<()> {
 }
 
 pub fn simulate(event: &Event) -> Result<()> {
+    if matches!(
+        event.event_type,
+        EventType::MouseMoved | EventType::MouseDragged
+    ) && let Some(Motion::Relative { delta_x, delta_y }) = motion_from_event(event)
+    {
+        return mouse_move_relative(delta_x, delta_y);
+    }
+
     match simulation_spec(event)? {
         SimulationSpec::Key { action, keycode } => NativeKeyEvent::new()?.inject(action, keycode),
         SimulationSpec::Mouse {
@@ -123,7 +156,22 @@ pub fn simulate(event: &Event) -> Result<()> {
             button,
             x,
             y,
-        } => NativeMouseEvent::new()?.inject(action, button, x, y),
+        } => {
+            NativeMouseEvent::new()?.inject(action, button, x, y)?;
+            remember_pointer_position(f64::from(x), f64::from(y));
+            Ok(())
+        }
+        SimulationSpec::Wheel {
+            action,
+            axis_type,
+            axis_value,
+            x,
+            y,
+        } => {
+            let mouse_event = NativeMouseEvent::new()?;
+            mouse_event.inject_axis(action, axis_type, axis_value, x, y)?;
+            mouse_event.inject_axis(MOUSE_ACTION_AXIS_END, axis_type, 0.0, x, y)
+        }
     }
 }
 
@@ -141,12 +189,12 @@ pub fn key_tap(key: Key) -> Result<()> {
 }
 
 pub fn mouse_press(button: Button) -> Result<()> {
-    let (x, y) = mouse_position()?;
+    let (x, y) = effective_pointer_position()?;
     simulate(&Event::mouse_pressed(button, x, y))
 }
 
 pub fn mouse_release(button: Button) -> Result<()> {
-    let (x, y) = mouse_position()?;
+    let (x, y) = effective_pointer_position()?;
     simulate(&Event::mouse_released(button, x, y))
 }
 
@@ -157,4 +205,14 @@ pub fn mouse_click(button: Button) -> Result<()> {
 
 pub fn mouse_move(x: f64, y: f64) -> Result<()> {
     simulate(&Event::mouse_moved(x, y))
+}
+
+pub fn mouse_move_relative(delta_x: f64, delta_y: f64) -> Result<()> {
+    if !delta_x.is_finite() || !delta_y.is_finite() {
+        return Err(Error::SimulateFailed(format!(
+            "HarmonyOS relative mouse delta must be finite: ({delta_x}, {delta_y})"
+        )));
+    }
+    let (x, y) = effective_pointer_position()?;
+    mouse_move(x + delta_x, y + delta_y)
 }

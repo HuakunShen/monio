@@ -46,7 +46,7 @@
 | **Windows** | Low-level input hooks | Native hooks and simulation; some injections may require elevation |
 | **Linux · X11** | XRecord, XGrab, XI2, XTest | Default Linux backend; system X11 libraries required |
 | **Linux · Wayland** | evdev / uinput | Supported via opt-in `evdev` feature; requires device permissions |
-| **HarmonyOS PC / 2-in-1** | Input Kit | Experimental, compile-checked only; not yet device-tested |
+| **HarmonyOS PC / 2-in-1** | Input Kit + Display Manager | Linked & emulator-tested (`MateBook Pro` 2-in-1); live monitor/hook capture awaits signed ACL permissions |
 
 **Support varies by feature and backend.** See [Platform Notes](#platform-notes) for limitations, permissions, and setup details.
 
@@ -54,8 +54,7 @@
 
 ## Features
 
-- **Cross-platform**: macOS, Windows, Linux (X11/evdev), and a compile-checked
-  HarmonyOS PC/2in1 backend
+- **Cross-platform**: macOS, Windows, Linux (X11/evdev), and HarmonyOS PC/2in1
 - **Proper drag detection**: Distinguishes `MouseDragged` from `MouseMoved` events
 - **Event grabbing**: Block events from reaching other applications (global hotkeys)
 - **Remote pointer capture**: Explicitly decouple macOS mouse motion from the local cursor
@@ -66,8 +65,8 @@
 - **Rust API**: Native platform bindings behind one cross-platform interface
 - **Event simulation**: Programmatically generate absolute or relative keyboard and mouse events
 - **Text input**: Commit arbitrary strings, including what an input method produces (macOS)
-- **Trackpad input**: Phased two-axis scrolling, pinch, rotate and smart zoom (macOS)
-- **Media keys**: Volume, brightness and playback, with the system's on-screen overlay (macOS)
+- **Trackpad input**: Phased two-axis scrolling, pinch, rotate and smart zoom (macOS; phased scrolling also on HarmonyOS)
+- **Media keys**: Volume, brightness and playback, with the system's on-screen overlay (macOS, HarmonyOS)
 - **Thread-safe**: Atomic state tracking for reliable button/modifier detection
 
 ## The Problem This Solves
@@ -683,11 +682,18 @@ does not request `ohos.permission.INTERCEPT_INPUT_EVENT`.
 `grab()` can consume keyboard events. Returning `Some(_)` dispatches the
 original native keyboard event; it cannot rewrite it. Mouse and wheel events
 are delivered to the handler for observation, but `None` cannot consume them.
-Pointer position is supported; display enumeration, primary-display lookup,
-display-at-point, and system input settings return `Error::NotSupported`.
+Pointer position, display enumeration, primary-display lookup, display-at-point,
+phased scrolling, mouse wheel simulation, relative mouse movement, and media
+keys are supported (`libohinput.so` + `libnative_display_manager.so`); system
+input settings, `RelativePointerCapture`, pinch/rotate gestures, and
+`type_text()` return `Error::NotSupported`.
 
-The backend has passed Rust checks for `aarch64-unknown-linux-ohos` on Linux,
-but has not been linked, packaged, signed, or run on a HarmonyOS PC. See
+The backend has been cross-compiled, linked with the HarmonyOS NDK, and
+packaged into a Stage-model NAPI test HAP on the `MateBook Pro` 2-in-1 emulator
+(HarmonyOS 6.1.1 / API 24), verifying display queries, injection, scroll, media
+keys, unsupported boundaries, and `PermissionDenied` classification. Live
+`INPUT_MONITORING` / `HOOK_KEY_EVENT` capture and API 26 `CONTROL_DEVICE`
+direct injection still require a signed app profile on a target device. See
 [`docs/harmonyos-pc-input-backend.md`](docs/harmonyos-pc-input-backend.md) for
 the SDK split, evidence, exact limitations, and native acceptance matrix.
 

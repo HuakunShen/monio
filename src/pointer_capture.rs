@@ -12,7 +12,7 @@ use std::sync::{Mutex, MutexGuard};
 static ACTIVE: AtomicBool = AtomicBool::new(false);
 static LIFECYCLE: Mutex<()> = Mutex::new(());
 
-#[cfg(all(test, not(target_os = "windows")))]
+#[cfg(all(test, not(any(target_os = "windows", target_env = "ohos"))))]
 pub(crate) static TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn lifecycle() -> MutexGuard<'static, ()> {
@@ -122,7 +122,7 @@ pub(crate) fn finish_hook_result(result: Result<()>) -> Result<()> {
     }
 }
 
-#[cfg(all(test, not(target_os = "windows")))]
+#[cfg(all(test, not(any(target_os = "windows", target_env = "ohos"))))]
 mod tests {
     use super::{RelativePointerCapture, TEST_MUTEX, release_active};
 

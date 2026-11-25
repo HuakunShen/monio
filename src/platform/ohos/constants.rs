@@ -6,6 +6,11 @@ pub(crate) const MOUSE_ACTION_CANCEL: i32 = 0;
 pub(crate) const MOUSE_ACTION_MOVE: i32 = 1;
 pub(crate) const MOUSE_ACTION_BUTTON_DOWN: i32 = 2;
 pub(crate) const MOUSE_ACTION_BUTTON_UP: i32 = 3;
+#[cfg_attr(not(target_env = "ohos"), allow(dead_code))]
+pub(crate) const MOUSE_ACTION_AXIS_BEGIN: i32 = 4;
+pub(crate) const MOUSE_ACTION_AXIS_UPDATE: i32 = 5;
+#[cfg_attr(not(target_env = "ohos"), allow(dead_code))]
+pub(crate) const MOUSE_ACTION_AXIS_END: i32 = 6;
 
 pub(crate) const MOUSE_BUTTON_NONE: i32 = -1;
 pub(crate) const MOUSE_BUTTON_LEFT: i32 = 0;
@@ -13,6 +18,9 @@ pub(crate) const MOUSE_BUTTON_MIDDLE: i32 = 1;
 pub(crate) const MOUSE_BUTTON_RIGHT: i32 = 2;
 pub(crate) const MOUSE_BUTTON_FORWARD: i32 = 3;
 pub(crate) const MOUSE_BUTTON_BACK: i32 = 4;
+
+pub(crate) const MOUSE_AXIS_SCROLL_VERTICAL: i32 = 0;
+pub(crate) const MOUSE_AXIS_SCROLL_HORIZONTAL: i32 = 1;
 
 pub(crate) const AXIS_TYPE_SCROLL_VERTICAL: u32 = 1;
 pub(crate) const AXIS_TYPE_SCROLL_HORIZONTAL: u32 = 2;

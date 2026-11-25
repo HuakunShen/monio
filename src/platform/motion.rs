@@ -6,7 +6,10 @@ pub(crate) enum Motion {
     Relative { delta_x: f64, delta_y: f64 },
 }
 
-#[cfg(any(all(target_os = "linux", feature = "evdev"), test))]
+#[cfg(any(
+    all(target_os = "linux", not(target_env = "ohos"), feature = "evdev"),
+    test
+))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct RelativeMotionSample {
     pub(crate) delta_x: i32,
@@ -14,7 +17,10 @@ pub(crate) struct RelativeMotionSample {
     pub(crate) dragging: bool,
 }
 
-#[cfg(any(all(target_os = "linux", feature = "evdev"), test))]
+#[cfg(any(
+    all(target_os = "linux", not(target_env = "ohos"), feature = "evdev"),
+    test
+))]
 #[derive(Debug, Default)]
 pub(crate) struct RelativeMotionFrame {
     delta_x: i32,
@@ -23,7 +29,10 @@ pub(crate) struct RelativeMotionFrame {
     has_motion: bool,
 }
 
-#[cfg(any(all(target_os = "linux", feature = "evdev"), test))]
+#[cfg(any(
+    all(target_os = "linux", not(target_env = "ohos"), feature = "evdev"),
+    test
+))]
 impl RelativeMotionFrame {
     pub(crate) fn record(&mut self, delta_x: i32, delta_y: i32, dragging: bool) {
         self.delta_x = self.delta_x.saturating_add(delta_x);

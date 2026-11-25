@@ -20,7 +20,7 @@
 //! | Windows | not implemented — `SendInput` with `VK_VOLUME_UP`/`VK_MEDIA_*`, which is straightforward and simply not written yet |
 //! | X11 | not implemented — `XF86AudioRaiseVolume` through XTest, subject to the desktop environment actually binding it |
 //! | Wayland | not implemented — libei can send the key; whether anything shows an overlay is the compositor's business |
-//! | HarmonyOS | not surveyed |
+//! | HarmonyOS | implemented — `OH_Input_InjectKeyEvent` with `KEYCODE_VOLUME_*`, `KEYCODE_BRIGHTNESS_*`, `KEYCODE_MEDIA_*` |
 
 use crate::error::Result;
 
@@ -51,16 +51,16 @@ pub enum MediaKey {
 /// # }
 /// ```
 pub fn media_key(key: MediaKey) -> Result<()> {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_env = "ohos"))]
     {
         crate::platform::media_key(key)
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_env = "ohos")))]
     {
         let _ = key;
         Err(crate::error::Error::NotSupported(format!(
-            "media keys are implemented for macOS only; {} needs SendInput with \
+            "media keys are implemented for macOS and HarmonyOS only; {} needs SendInput with \
              VK_VOLUME_* or the XF86Audio* keysyms — see this module's documentation",
             std::env::consts::OS,
         )))

@@ -4,6 +4,7 @@ use super::constants::{
     AXIS_ACTION_UPDATE, AXIS_EVENT_TYPE_SCROLL, AXIS_TYPE_SCROLL_HORIZONTAL,
     AXIS_TYPE_SCROLL_VERTICAL,
 };
+use super::display::remember_pointer_position;
 use super::lifecycle::{
     HandlerMode, RegistrationApi, RegistrationMode, register, should_dispatch_original, unregister,
 };
@@ -288,6 +289,7 @@ fn mouse_monitor_impl(event: *const Input_MouseEvent) {
         )
     };
     if let Some(event) = translate_mouse(action, button, f64::from(x), f64::from(y)) {
+        remember_pointer_position(f64::from(x), f64::from(y));
         deliver_observed(event);
     }
 }

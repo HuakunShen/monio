@@ -1,12 +1,14 @@
 use super::constants::{
     AXIS_TYPE_SCROLL_HORIZONTAL, AXIS_TYPE_SCROLL_VERTICAL, KEY_ACTION_CANCEL, KEY_ACTION_DOWN,
-    KEY_ACTION_UP, MOUSE_ACTION_BUTTON_DOWN, MOUSE_ACTION_BUTTON_UP, MOUSE_ACTION_CANCEL,
-    MOUSE_ACTION_MOVE, MOUSE_BUTTON_NONE,
+    KEY_ACTION_UP, MOUSE_ACTION_AXIS_BEGIN, MOUSE_ACTION_AXIS_END, MOUSE_ACTION_AXIS_UPDATE,
+    MOUSE_ACTION_BUTTON_DOWN, MOUSE_ACTION_BUTTON_UP, MOUSE_ACTION_CANCEL, MOUSE_ACTION_MOVE,
+    MOUSE_AXIS_SCROLL_HORIZONTAL, MOUSE_AXIS_SCROLL_VERTICAL, MOUSE_BUTTON_NONE,
 };
 use super::keycodes::{button_from_native, button_to_native, key_to_keycode, keycode_to_key};
 use crate::error::{Error, Result};
 use crate::event::{Button, Event, EventType, ScrollDirection};
 use crate::keycode::Key;
+use crate::scroll::ScrollPhase;
 use crate::state::{self, MASK_ALT, MASK_CTRL, MASK_META, MASK_SHIFT, button_to_mask};
 
 fn modifier_mask(key: Key) -> u32 {
@@ -85,6 +87,13 @@ pub(crate) enum SimulationSpec {
         x: i32,
         y: i32,
     },
+    Wheel {
+        action: i32,
+        axis_type: i32,
+        axis_value: f32,
+        x: i32,
+        y: i32,
+    },
 }
 
 pub(crate) fn simulation_spec(event: &Event) -> Result<SimulationSpec> {
@@ -133,7 +142,7 @@ pub(crate) fn simulation_spec(event: &Event) -> Result<SimulationSpec> {
                 y,
             })
         }
-        EventType::MouseMoved => {
+        EventType::MouseMoved | EventType::MouseDragged => {
             let mouse = event.mouse.as_ref().ok_or_else(|| {
                 Error::NotSupported("HarmonyOS mouse move is missing mouse data".into())
             })?;
@@ -145,11 +154,90 @@ pub(crate) fn simulation_spec(event: &Event) -> Result<SimulationSpec> {
                 y,
             })
         }
+        EventType::MouseWheel => {
+            let wheel = event.wheel.as_ref().ok_or_else(|| {
+                Error::NotSupported("HarmonyOS wheel event is missing wheel data".into())
+            })?;
+            if !wheel.delta.is_finite() {
+                return Err(Error::SimulateFailed(format!(
+                    "HarmonyOS wheel delta must be finite: {}",
+                    wheel.delta
+                )));
+            }
+            let (x, y) = checked_coordinates(wheel.x, wheel.y)?;
+            let magnitude = wheel.delta.abs() as f32;
+            let (axis_type, axis_value) = match wheel.direction {
+                ScrollDirection::Up => (MOUSE_AXIS_SCROLL_VERTICAL, magnitude),
+                ScrollDirection::Down => (MOUSE_AXIS_SCROLL_VERTICAL, -magnitude),
+                ScrollDirection::Right => (MOUSE_AXIS_SCROLL_HORIZONTAL, magnitude),
+                ScrollDirection::Left => (MOUSE_AXIS_SCROLL_HORIZONTAL, -magnitude),
+            };
+            Ok(SimulationSpec::Wheel {
+                action: MOUSE_ACTION_AXIS_UPDATE,
+                axis_type,
+                axis_value,
+                x,
+                y,
+            })
+        }
         _ => Err(Error::NotSupported(format!(
             "HarmonyOS cannot simulate {:?} events",
             event.event_type
         ))),
     }
+}
+
+#[cfg_attr(not(target_env = "ohos"), allow(dead_code))]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct AxisStep {
+    pub(crate) action: i32,
+    pub(crate) axis_type: i32,
+    pub(crate) axis_value: f32,
+}
+
+#[cfg_attr(not(target_env = "ohos"), allow(dead_code))]
+pub(crate) fn plan_scroll_steps(
+    delta_x: f64,
+    delta_y: f64,
+    phase: ScrollPhase,
+) -> Result<Vec<AxisStep>> {
+    if !delta_x.is_finite() || !delta_y.is_finite() {
+        return Err(Error::SimulateFailed(format!(
+            "HarmonyOS scroll deltas must be finite: ({delta_x}, {delta_y})"
+        )));
+    }
+    let dx = delta_x as f32;
+    let dy = delta_y as f32;
+    let actions: &[i32] = match phase {
+        ScrollPhase::Discrete => &[
+            MOUSE_ACTION_AXIS_BEGIN,
+            MOUSE_ACTION_AXIS_UPDATE,
+            MOUSE_ACTION_AXIS_END,
+        ],
+        ScrollPhase::Began | ScrollPhase::MomentumBegan => &[MOUSE_ACTION_AXIS_BEGIN],
+        ScrollPhase::Changed | ScrollPhase::MomentumChanged => &[MOUSE_ACTION_AXIS_UPDATE],
+        ScrollPhase::Ended | ScrollPhase::MomentumEnded => &[MOUSE_ACTION_AXIS_END],
+    };
+
+    let mut steps = Vec::new();
+    for &action in actions {
+        let is_boundary = action == MOUSE_ACTION_AXIS_BEGIN || action == MOUSE_ACTION_AXIS_END;
+        if dy != 0.0 || (dx == 0.0 && is_boundary) {
+            steps.push(AxisStep {
+                action,
+                axis_type: MOUSE_AXIS_SCROLL_VERTICAL,
+                axis_value: dy,
+            });
+        }
+        if dx != 0.0 {
+            steps.push(AxisStep {
+                action,
+                axis_type: MOUSE_AXIS_SCROLL_HORIZONTAL,
+                axis_value: dx,
+            });
+        }
+    }
+    Ok(steps)
 }
 
 fn checked_coordinates(x: f64, y: f64) -> Result<(i32, i32)> {
@@ -299,6 +387,25 @@ mod tests {
                 y: 60,
             }
         );
+        assert_eq!(
+            simulation_spec(&Event::mouse_dragged(50.0, 60.0)).unwrap(),
+            SimulationSpec::Mouse {
+                action: 1,
+                button: -1,
+                x: 50,
+                y: 60,
+            }
+        );
+        assert_eq!(
+            simulation_spec(&Event::mouse_wheel(10.0, 20.0, ScrollDirection::Up, 2.5)).unwrap(),
+            SimulationSpec::Wheel {
+                action: MOUSE_ACTION_AXIS_UPDATE,
+                axis_type: MOUSE_AXIS_SCROLL_VERTICAL,
+                axis_value: 2.5,
+                x: 10,
+                y: 20,
+            }
+        );
     }
 
     #[test]
@@ -307,10 +414,8 @@ mod tests {
             Event::key_pressed(Key::F13, 0),
             Event::mouse_pressed(Button::Unknown(42), 1.0, 2.0),
             Event::mouse_clicked(Button::Left, 1.0, 2.0, 1),
-            Event::mouse_dragged(1.0, 2.0),
             Event::key_typed(Key::KeyA, 2017, 'a'),
             Event::hook_enabled(),
-            Event::mouse_wheel(1.0, 2.0, ScrollDirection::Up, 1.0),
         ];
 
         for event in unsupported {
@@ -325,11 +430,50 @@ mod tests {
             Event::mouse_moved(1.0, f64::INFINITY),
             Event::mouse_moved(i32::MAX as f64 + 1.0, 1.0),
             Event::mouse_moved(1.0, i32::MIN as f64 - 1.0),
+            Event::mouse_wheel(1.0, 2.0, ScrollDirection::Up, f64::NAN),
         ] {
             assert!(matches!(
                 simulation_spec(&event),
                 Err(Error::SimulateFailed(_))
             ));
         }
+    }
+
+    #[test]
+    fn scroll_steps_plan_discrete_and_boundary_phases() {
+        let discrete = plan_scroll_steps(0.0, -15.0, ScrollPhase::Discrete).unwrap();
+        assert_eq!(
+            discrete,
+            vec![
+                AxisStep {
+                    action: MOUSE_ACTION_AXIS_BEGIN,
+                    axis_type: MOUSE_AXIS_SCROLL_VERTICAL,
+                    axis_value: -15.0,
+                },
+                AxisStep {
+                    action: MOUSE_ACTION_AXIS_UPDATE,
+                    axis_type: MOUSE_AXIS_SCROLL_VERTICAL,
+                    axis_value: -15.0,
+                },
+                AxisStep {
+                    action: MOUSE_ACTION_AXIS_END,
+                    axis_type: MOUSE_AXIS_SCROLL_VERTICAL,
+                    axis_value: -15.0,
+                },
+            ]
+        );
+
+        let ended = plan_scroll_steps(0.0, 0.0, ScrollPhase::Ended).unwrap();
+        assert_eq!(
+            ended,
+            vec![AxisStep {
+                action: MOUSE_ACTION_AXIS_END,
+                axis_type: MOUSE_AXIS_SCROLL_VERTICAL,
+                axis_value: 0.0,
+            }]
+        );
+
+        assert!(plan_scroll_steps(f64::NAN, 0.0, ScrollPhase::Changed).is_err());
+        assert!(plan_scroll_steps(0.0, f64::INFINITY, ScrollPhase::Changed).is_err());
     }
 }

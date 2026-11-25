@@ -1,8 +1,8 @@
 # HarmonyOS PC input backend
 
-Status: implementation compile-checked; native linking and PC verification pending.
+Status: synced with `main` (v0.2.0), linked against NDK `libohinput.so` + `libnative_display_manager.so`, and simulator-tested on `MateBook Pro` 2-in-1 (API 24); signed ACL verification for `INPUT_MONITORING` / `HOOK_KEY_EVENT` / API 26 `CONTROL_DEVICE` pending.
 
-Last updated: 2026-07-30
+Last updated: 2026-11-25
 
 Target: HarmonyOS PC/2in1, API 26.0.0 or newer.
 
@@ -32,8 +32,26 @@ Monio. Compile checks alone must not be described as native verification.
   callbacks do not provide evidence strong enough to identify input injected
   by this Monio process.
 - Put HarmonyOS behind `target_env = "ohos"`, not `target_os = "linux"`.
-- Treat display topology and system input settings as unsupported in the first
-  backend. Pointer position remains supported through Input Kit.
+- Display enumeration, primary-display lookup, and display-at-point are
+  implemented via `ohos-display-sys` (`libnative_display_manager.so`).
+  System input settings remain `Error::NotSupported`.
+- `scroll()` and `EventType::MouseWheel` simulation are implemented via
+  `OH_Input_InjectMouseEventGlobal` using `MOUSE_ACTION_AXIS_BEGIN`/`UPDATE`/`END`
+  and `InputEvent_MouseAxis`. `media_key()` is implemented via
+  `OH_Input_InjectKeyEvent`. `RelativePointerCapture`, `gesture::*`, and
+  `type_text()` return `Error::NotSupported`.
+- Note on standalone binaries vs Stage-model apps: `libohinput.so` and
+  `libnative_display_manager.so` transitively depend on `libace_napi.z.so` ->
+  `libark_jsruntime.so`, so binaries running outside an ArkTS `appspawn`
+  process (e.g., raw `hdc shell` executables) fail dynamic relocation. Test and
+  run Monio inside a HarmonyOS HAP (via NAPI `.so`).
+- Note on `OH_Input_GetPointerLocation`: when no physical pointer device is
+  attached (observed on the `MateBook Pro` 2-in-1 emulator), Input Kit returns
+  `3900010` (`INPUT_DEVICE_NO_POINTER` -> `Error::NotSupported`) even after
+  `mouse_move()` succeeds. `mouse_position()` reports that native error
+  truthfully, while `mouse_move_relative()`, `mouse_press()`, `mouse_release()`,
+  and `scroll()` fall back to the last known/injected pointer position (or
+  primary display center for `scroll()`).
 
 ## Evidence from current documentation
 

@@ -1,0 +1,28 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "Monio GPUI input monitoring and simulation example"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "Monio GPUI native window ability"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "Monio Input Studio"
+    },
+    {
+      "name": "reason_input_monitoring",
+      "value": "Observe keyboard, mouse, drag, and wheel events in the Monitor tab"
+    },
+    {
+      "name": "reason_hook_key_event",
+      "value": "Demonstrate global keyboard event grabbing and filtering in the Monitor & Grab tab"
+    },
+    {
+      "name": "reason_control_device",
+      "value": "Inject simulated key, mouse, scroll, and media key events in the Simulate tab"
+    }
+  ]
+}

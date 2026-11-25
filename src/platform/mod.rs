@@ -3,6 +3,7 @@
 #[cfg(any(
     target_os = "macos",
     target_os = "windows",
+    target_env = "ohos",
     all(target_os = "linux", any(feature = "x11", feature = "evdev"))
 ))]
 mod motion;
