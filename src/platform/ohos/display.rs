@@ -138,8 +138,15 @@ pub fn mouse_position() -> Result<(f64, f64)> {
     // valid for this synchronous call.
     match unsafe { OH_Input_GetPointerLocation(&mut display_id, &mut x, &mut y) } {
         Ok(()) => {
-            remember_pointer_position(x, y);
-            Ok((x, y))
+            let known_displays = displays().unwrap_or_default();
+            let (global_x, global_y) = super::translate::resolve_global_pointer_position(
+                display_id,
+                x,
+                y,
+                &known_displays,
+            );
+            remember_pointer_position(global_x, global_y);
+            Ok((global_x, global_y))
         }
         Err(code) => Err(platform_error("OH_Input_GetPointerLocation", code.0.get())),
     }

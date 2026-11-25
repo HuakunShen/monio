@@ -347,8 +347,10 @@ fn render_capability_matrix(cx: &App) -> impl IntoElement {
         .child(section_title("Platform Capability Matrix", cx))
         .children(rows.into_iter().enumerate().map(|(idx, row)| {
             let status_tag = match row.support {
-                "Supported" => Tag::success().small().child(row.support),
-                "Observe-only" | "No-op lease" => Tag::warning().small().child(row.support),
+                "Supported" | "Global" => Tag::success().small().child(row.support),
+                "Observe-only" | "ObserveOnly" | "FocusedWindow" | "No-op lease" => {
+                    Tag::warning().small().child(row.support)
+                }
                 _ => Tag::secondary().small().child(row.support),
             };
             div()

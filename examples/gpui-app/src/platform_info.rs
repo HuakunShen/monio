@@ -50,47 +50,48 @@ pub const fn permission_hint() -> &'static str {
 }
 
 pub fn capability_matrix() -> Vec<CapabilityRow> {
+    let caps = monio::capabilities();
     if cfg!(target_env = "ohos") {
         vec![
             CapabilityRow {
-                capability: "Listen (Hook)",
+                capability: "Keyboard Listen / Grab",
+                support: caps.keyboard_grab.as_str(),
+                notes: "Monitor (INPUT_MONITORING) & KeyHook (HOOK_KEY_EVENT)",
+            },
+            CapabilityRow {
+                capability: "Pointer Listen",
+                support: caps.pointer_listen.as_str(),
+                notes: "Mouse/axis monitors (INPUT_MONITORING; OS may require screen-recording scenario)",
+            },
+            CapabilityRow {
+                capability: "Pointer Grab (global)",
+                support: caps.pointer_grab.as_str(),
+                notes: "Generic grab() is observe-only for pointer; window-hit Interceptor exists in Input Kit",
+            },
+            CapabilityRow {
+                capability: "Key, Mouse, Scroll & Media",
                 support: "Supported",
-                notes: "Key, mouse, and axis monitors (requires INPUT_MONITORING)",
+                notes: "OH_Input_Inject*Global / InjectKeyEvent (PC / 2-in-1; CONTROL_DEVICE)",
             },
             CapabilityRow {
-                capability: "Keyboard Grab",
+                capability: "type_text() & Gestures",
+                support: "Unsupported",
+                notes: "No global Unicode or pinch/rotate injection API in Input Kit",
+            },
+            CapabilityRow {
+                capability: "displays() / mouse_position()",
                 support: "Supported",
-                notes: "Global key hook via OH_Input_AddKeyEventHook (HOOK_KEY_EVENT)",
-            },
-            CapabilityRow {
-                capability: "Pointer Grab",
-                support: "Observe-only",
-                notes: "Mouse/axis monitors cannot suppress delivery in generic grab()",
-            },
-            CapabilityRow {
-                capability: "Key & Mouse Simulate",
-                support: "Supported",
-                notes: "Requires API 26+ CONTROL_DEVICE permission",
-            },
-            CapabilityRow {
-                capability: "Phased Scroll & Media Keys",
-                support: "Supported",
-                notes: "OH_Input_InjectMouseEventGlobal / OH_Input_InjectKeyEvent",
-            },
-            CapabilityRow {
-                capability: "type_text()",
-                support: "NotSupported",
-                notes: "Input Kit has no global Unicode text-injection API",
-            },
-            CapabilityRow {
-                capability: "displays() / primary_display()",
-                support: "Supported",
-                notes: "Via libnative_display_manager.so; system_settings() NotSupported",
+                notes: "Displays via libnative_display_manager.so; mouse_position() maps display_id to global coords",
             },
             CapabilityRow {
                 capability: "RelativePointerCapture",
-                support: "NotSupported",
-                notes: "Returns Error::NotSupported on HarmonyOS",
+                support: caps.relative_pointer_capture.as_str(),
+                notes: "No global cursor-lock API; Window Kit LockCursor + ArkUI RawDelta require a focused window",
+            },
+            CapabilityRow {
+                capability: "Channels / Recorder / Stats",
+                support: "Supported",
+                notes: "Built on Hook; inherits underlying Listen/Grab scope & permissions",
             },
         ]
     } else if cfg!(target_os = "macos") {

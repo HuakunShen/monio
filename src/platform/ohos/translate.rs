@@ -5,6 +5,7 @@ use super::constants::{
     MOUSE_AXIS_SCROLL_HORIZONTAL, MOUSE_AXIS_SCROLL_VERTICAL, MOUSE_BUTTON_NONE,
 };
 use super::keycodes::{button_from_native, button_to_native, key_to_keycode, keycode_to_key};
+use crate::display::DisplayInfo;
 use crate::error::{Error, Result};
 use crate::event::{Button, Event, EventType, ScrollDirection};
 use crate::keycode::Key;
@@ -256,6 +257,21 @@ fn checked_coordinates(x: f64, y: f64) -> Result<(i32, i32)> {
     Ok((x as i32, y as i32))
 }
 
+#[allow(dead_code)]
+pub(crate) fn resolve_global_pointer_position(
+    display_id: i32,
+    local_x: f64,
+    local_y: f64,
+    displays: &[DisplayInfo],
+) -> (f64, f64) {
+    if let Ok(target_id) = u32::try_from(display_id)
+        && let Some(display) = displays.iter().find(|d| d.id == target_id)
+    {
+        return (display.bounds.x + local_x, display.bounds.y + local_y);
+    }
+    (local_x, local_y)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -475,5 +491,48 @@ mod tests {
 
         assert!(plan_scroll_steps(f64::NAN, 0.0, ScrollPhase::Changed).is_err());
         assert!(plan_scroll_steps(0.0, f64::INFINITY, ScrollPhase::Changed).is_err());
+    }
+
+    #[test]
+    fn resolves_display_local_pointer_coordinates_to_global_bounds() {
+        let displays = [
+            DisplayInfo {
+                id: 0,
+                bounds: crate::display::Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 1920.0,
+                    height: 1080.0,
+                },
+                scale_factor: 1.0,
+                refresh_rate: Some(60),
+                is_primary: true,
+            },
+            DisplayInfo {
+                id: 1,
+                bounds: crate::display::Rect {
+                    x: -1440.0,
+                    y: 120.0,
+                    width: 1440.0,
+                    height: 900.0,
+                },
+                scale_factor: 1.0,
+                refresh_rate: Some(60),
+                is_primary: false,
+            },
+        ];
+
+        assert_eq!(
+            resolve_global_pointer_position(0, 100.0, 200.0, &displays),
+            (100.0, 200.0)
+        );
+        assert_eq!(
+            resolve_global_pointer_position(1, 440.0, 80.0, &displays),
+            (-1000.0, 200.0)
+        );
+        assert_eq!(
+            resolve_global_pointer_position(99, 12.0, 34.0, &displays),
+            (12.0, 34.0)
+        );
     }
 }

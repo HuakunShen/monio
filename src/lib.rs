@@ -67,6 +67,7 @@
 //! of drag events - when a mouse move occurs while a button is held, we emit
 //! `MouseDragged` instead of `MouseMoved`.
 
+pub mod capabilities;
 pub mod channel;
 pub mod display;
 pub mod error;
@@ -87,6 +88,7 @@ pub mod scroll;
 pub mod text;
 
 // Re-exports
+pub use capabilities::{CaptureScope, InputCapabilities, capabilities};
 pub use display::{
     DisplayInfo, Rect, SystemSettings, display_at_point, displays, primary_display, system_settings,
 };

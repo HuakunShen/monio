@@ -22,7 +22,12 @@ pub(crate) fn classify_code(code: u32) -> FailureKind {
 }
 
 fn details(operation: &str, code: u32) -> String {
-    format!("{operation} failed with HarmonyOS Input Kit result {code}")
+    let hint = match code {
+        3_900_009 => " (INPUT_APP_NOT_FOCUSED: application window is not focused)",
+        3_900_010 => " (INPUT_DEVICE_NO_POINTER: no pointer device is active)",
+        _ => "",
+    };
+    format!("{operation} failed with HarmonyOS Input Kit result {code}{hint}")
 }
 
 pub(crate) fn hook_start_error(operation: &str, code: u32, permission: &str) -> Error {
