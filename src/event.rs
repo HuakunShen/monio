@@ -105,6 +105,10 @@ pub struct KeyboardData {
     pub raw_code: u32,
     /// The Unicode character, if this is a KeyTyped event.
     pub char: Option<char>,
+    /// Whether the OS marked this key-down as an autorepeat (macOS
+    /// `kCGKeyboardEventAutorepeat`). `false` where the platform does not say.
+    #[cfg_attr(feature = "recorder", serde(default))]
+    pub autorepeat: bool,
 }
 
 /// Relative pointer motion associated with a mouse movement event.
@@ -227,6 +231,7 @@ impl Event {
             key,
             raw_code,
             char: None,
+            autorepeat: false,
         });
         event
     }
@@ -238,6 +243,7 @@ impl Event {
             key,
             raw_code,
             char: None,
+            autorepeat: false,
         });
         event
     }
@@ -249,6 +255,7 @@ impl Event {
             key,
             raw_code,
             char: Some(char),
+            autorepeat: false,
         });
         event
     }
