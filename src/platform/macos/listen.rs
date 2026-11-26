@@ -251,7 +251,15 @@ unsafe fn convert_event(event_type: CGEventType, cg_event: NonNull<CGEvent>) -> 
                 CGEventField::KeyboardEventKeycode,
             );
             let key = keycode_to_key(code as u16);
-            Some(Event::key_pressed(key, code as u32))
+            let autorepeat = CGEvent::integer_value_field(
+                Some(cg_event.as_ref()),
+                CGEventField::KeyboardEventAutorepeat,
+            ) != 0;
+            let mut event = Event::key_pressed(key, code as u32);
+            if let Some(keyboard) = event.keyboard.as_mut() {
+                keyboard.autorepeat = autorepeat;
+            }
+            Some(event)
         }
 
         CGEventType::KeyUp => {
