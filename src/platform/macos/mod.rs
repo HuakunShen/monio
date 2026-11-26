@@ -3,6 +3,7 @@
 pub mod accessibility;
 mod display;
 mod gesture;
+mod hid_sender;
 mod keycodes;
 mod listen;
 mod media;
