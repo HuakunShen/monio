@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::ffi::c_void;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{LazyLock, Once, RwLock};
+use std::sync::{LazyLock, Once, OnceLock, RwLock};
 use std::time::{Duration, Instant};
 
 #[link(name = "IOKit", kind = "framework")]
@@ -86,7 +86,11 @@ impl SenderCache {
         if let Some(&kind) = guard.get(&sender) {
             Some(kind)
         } else {
-            self.refresh_requested.store(true, Ordering::Release);
+            if !self.refresh_requested.swap(true, Ordering::AcqRel)
+                && let Some(thread) = REFRESH_THREAD_HANDLE.get()
+            {
+                thread.unpark();
+            }
             None
         }
     }
@@ -102,6 +106,7 @@ impl SenderCache {
 
 static CACHE: LazyLock<SenderCache> = LazyLock::new(SenderCache::new);
 static REFRESH_THREAD: Once = Once::new();
+static REFRESH_THREAD_HANDLE: OnceLock<std::thread::Thread> = OnceLock::new();
 static WARN_LOGGED: AtomicBool = AtomicBool::new(false);
 
 fn log_refresh_failure_once(error: &str) {
@@ -235,10 +240,14 @@ pub(super) fn initialize() {
             .spawn(|| {
                 let mut last_refresh = Instant::now();
                 loop {
-                    std::thread::sleep(Duration::from_millis(200));
-                    if last_refresh.elapsed() >= Duration::from_secs(1)
-                        && CACHE.refresh_requested.swap(false, Ordering::AcqRel)
-                    {
+                    while !CACHE.refresh_requested.load(Ordering::Acquire) {
+                        std::thread::park();
+                    }
+                    let elapsed = last_refresh.elapsed();
+                    if elapsed < Duration::from_secs(1) {
+                        std::thread::sleep(Duration::from_secs(1) - elapsed);
+                    }
+                    if CACHE.refresh_requested.swap(false, Ordering::AcqRel) {
                         if let Err(error) = refresh() {
                             log_refresh_failure_once(&error);
                         }
@@ -246,8 +255,16 @@ pub(super) fn initialize() {
                     }
                 }
             });
-        if let Err(error) = spawned {
-            log_refresh_failure_once(&format!("failed to spawn HID sender refresh thread: {error}"));
+        match spawned {
+            Ok(handle) => {
+                let _ = REFRESH_THREAD_HANDLE.set(handle.thread().clone());
+                if CACHE.refresh_requested.load(Ordering::Acquire) {
+                    handle.thread().unpark();
+                }
+            }
+            Err(error) => {
+                log_refresh_failure_once(&format!("failed to spawn HID sender refresh thread: {error}"));
+            }
         }
     });
 }
